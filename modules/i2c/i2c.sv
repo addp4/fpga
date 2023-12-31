@@ -25,8 +25,8 @@ module send_byte(input clk,
                  output      busy);
    
    enum bit[4:0] {
-                  /*0x0*/ SEND_DATA,    SEND_DATA_1,  SEND_DATA_2,  SEND_DATA_3,
-                  /*0x4*/ SEND_DATA_4,  SEND_DATA_5,  SEND_DATA_6,  SEND_DATA_UNUSED,
+                  /*0x0*/ WRITE_BYTE,    WRITE_BYTE_1,  WRITE_BYTE_2,  WRITE_BYTE_3,
+                  /*0x4*/ WRITE_BYTE_4,  WRITE_BYTE_5,  WRITE_BYTE_6,  WRITE_BYTE_UNUSED,
                   /*0x15*/ IDLE,         RESET,        RESET_1
                   } state = IDLE;
    always_ff @(posedge clk) begin
@@ -42,7 +42,6 @@ endmodule // send_byte
 module simple_i2c(
     input      clk,
     input      rst_n,
-    input      read_ena,
     input      write_ena,
     input      sda_in,
     input      scl_in,
@@ -60,14 +59,14 @@ module simple_i2c(
    reg [7:0] address;
    reg [7:0] data, shift_data;
    reg [31:0] delay;
-   reg [2:0]  delay_shift;
+   reg [4:0]  delay_shift;
    reg       scl, sda_out_ena;
    reg       sda, scl_out_ena;
    reg       ack;
    enum      bit[2:0] { CMD_NONE, CMD_RESET, CMD_WRITE } cmd;
    enum      bit[4:0] {
-                       /*0x0*/ SEND_DATA,    SEND_DATA_1,  SEND_DATA_2,  SEND_DATA_3,
-                       /*0x4*/ SEND_DATA_4,  SEND_DATA_5,  SEND_DATA_6,  SEND_DATA_UNUSED,
+                       /*0x0*/ WRITE_BYTE,    WRITE_BYTE_1,  WRITE_BYTE_2,  WRITE_BYTE_3,
+                       /*0x4*/ WRITE_BYTE_4,  WRITE_BYTE_5,  WRITE_BYTE_6,  WRITE_BYTE_UNUSED,
                        /*0x8*/ READ_ACK_1,   READ_ACK_2,   READ_ACK_3,   READ_ACK_4,
                        /*0xc*/ READ_ACK_5,   READ_ACK_6,
                        /*0xe*/ SEND_START,   SEND_START_2, SEND_START_3, SEND_START_4,
@@ -98,7 +97,7 @@ module simple_i2c(
         IDLE: begin
            case (cmd)
              CMD_RESET: state <= RESET;
-             CMD_WRITE: state <= SEND_DATA;
+             CMD_WRITE: state <= WRITE_BYTE;
            endcase // case (cmd)
         end
         
@@ -131,36 +130,36 @@ module simple_i2c(
         SEND_START_6: `I2C_DELAY_THEN(SEND_START_7)
         SEND_START_7: begin     // scl <= 0
            `SCL_LOW;
-           state <= SEND_DATA;
+           state <= WRITE_BYTE;
         end
 
         // The address and the data bytes are sent most significant bit first
-        SEND_DATA: begin        // invariant: scl == 0
+        WRITE_BYTE: begin        // invariant: scl == 0
            `SCL_LOW;
            shift_count <= 7;
-           state <= SEND_DATA_1;
+           state <= WRITE_BYTE_1;
         end
-        SEND_DATA_1: begin
+        WRITE_BYTE_1: begin
            `SDA_SET(shift_data[7]);   // send msb
            shift_count <= shift_count - 1;
            `INIT_DELAY_CTR;
-           state <= SEND_DATA_2;
+           state <= WRITE_BYTE_2;
         end
-        SEND_DATA_2: `I2C_DELAY_THEN(SEND_DATA_3)
-        SEND_DATA_3: begin
+        WRITE_BYTE_2: `I2C_DELAY_THEN(WRITE_BYTE_3)
+        WRITE_BYTE_3: begin
            `SCL_HIGH;
            `INIT_DELAY_CTR;
-           state <= SEND_DATA_4;
+           state <= WRITE_BYTE_4;
         end
-        SEND_DATA_4: `I2C_DELAY_THEN(SEND_DATA_5)
-        SEND_DATA_5: begin      // while (scl == 0) ; clock stretching
-           if (scl_in != 0) state <= SEND_DATA_6;
+        WRITE_BYTE_4: `I2C_DELAY_THEN(WRITE_BYTE_5)
+        WRITE_BYTE_5: begin      // while (scl == 0) ; clock stretching
+           if (scl_in != 0) state <= WRITE_BYTE_6;
         end
-        SEND_DATA_6: begin
+        WRITE_BYTE_6: begin
            if (sda_in != shift_data[7]) error <= 1;
            `SCL_LOW;
            shift_data <= shift_data << 1;
-           state <= (signed'(shift_count) < 0) ? READ_ACK_1 : SEND_DATA_1;
+           state <= (signed'(shift_count) < 0) ? READ_ACK_1 : WRITE_BYTE_1;
         end
 
         // Each byte of data (including the address byte) is followed

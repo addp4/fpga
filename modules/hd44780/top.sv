@@ -1,4 +1,4 @@
-module lcdtest(input clk, input [2:0]sw, inout [1:0]JC,
+module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
                output [15:0] led, [0:6]seg, [3:0]an );
    wire lcd_busy, scl, sda;
    localparam us = 100;
@@ -16,7 +16,7 @@ module lcdtest(input clk, input [2:0]sw, inout [1:0]JC,
                                                            lcd.i2c.state[3:0],
                                                            lcd.i2c.data}));
    
-   enum      bit[2:0] { RESET, RESET_1, INIT, INIT_1, WRITE, WRITE_1 } state = RESET;
+   enum      bit[2:0] { RESET, RESET_1, INIT, INIT_1, WRITE, WRITE_1, WRITE_2 } state = RESET;
    reg [31:0] delay;
    assign led[0] = lcd.i2c.ack;
    assign led[1] = lcd.i2c.error;
@@ -31,7 +31,8 @@ module lcdtest(input clk, input [2:0]sw, inout [1:0]JC,
       case (state)
         RESET: begin
            lcd.cmd <= lcd.CMD_IDLE;
-           delay <= 2000 * ms;
+           lcd.vchr <= 8'b01000001;
+           delay <= 1000 * ms;
            state <= RESET_1;
         end
         RESET_1: begin
@@ -50,7 +51,12 @@ module lcdtest(input clk, input [2:0]sw, inout [1:0]JC,
            lcd.cmd <= lcd.CMD_WRITE;
            if (lcd_busy) state <= WRITE_1; // if write started
         end
-        WRITE_1: if (!lcd_busy) state <= WRITE; // write forever
+        WRITE_1: if (!lcd_busy) state <= WRITE_2; // write forever
+        WRITE_2: begin
+           if (lcd.vchr == 8'h7f) lcd.vchr <= 8'h20;
+           else lcd.vchr <= lcd.vchr + 1;
+           state <= WRITE;
+        end
       endcase // case (state)
    end
    
