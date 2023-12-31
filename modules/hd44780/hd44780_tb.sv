@@ -11,8 +11,8 @@ module hd44780_tb();
    always #1 clk++;
    
    initial begin
-      $monitor("time=%0d i2c_busy=%d i2c_data=%x state=%s i2c_cmd=%s clk=%d dindex=%d", 
-               $time, lcd.i2c_busy, lcd.i2c.data, lcd.state.name(), lcd.i2c.cmd.name(), clk, lcd.dindex);
+      $monitor("time=%0d i2c_busy=%d i2c_data=%x lcd.state=%s i2c.cmd=%s i2c.state=%s clk=%d dindex=%d", 
+               $time, lcd.i2c_busy, lcd.i2c.data, lcd.state.name(), lcd.i2c.cmd.name(), lcd.i2c.state.name(), clk, lcd.dindex);
 
       #2 lcd.cmd = lcd.CMD_INIT;
       while (!busy) #1;

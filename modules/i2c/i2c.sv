@@ -3,13 +3,12 @@
 // https://www.ti.com/lit/ds/symlink/pcf8574.pdf?ts=1703307030725
 // https://www.ti.com/lit/an/slva704/slva704.pdf?ts=1703257669779
 
-// `define SIMULATION
-`define DELAY_THEN(next) \
+`define I2C_DELAY_THEN(next) \
    begin \
     delay <= delay - 1; \
-    if (delay[15]) state <= next; \
+    if (signed'(delay) < 0) state <= next; \
    end
-`define SDA_SET(x) sda <= x; sda_out_ena <= 1
+`define SDA_SET(v) sda <= v; sda_out_ena <= 1
 `define SDA_HIGH sda <= 1; sda_out_ena <= 1
 `define SDA_LOW sda <= 0; sda_out_ena <= 1
 `define SCL_HIGH scl <= 1; scl_out_ena <= 1
@@ -30,20 +29,17 @@ module simple_i2c(
     );
    localparam us = 100;         // cycles per microsecond @ 100MHz
 `ifdef SIMULATION   
-   // localparam delay_cycles = 2;
+   localparam delay_cycles = 2;
 `else
-   localparam delay_cycles = 10 * us; // 100 KHz
+   // localparam delay_cycles = 10 * us; // 100 KHz
+   localparam delay_cycles = 100000 * us; // 100 KHz
 `endif
    reg [7:0] address;
    reg [7:0] data, shift_data;
-   reg [15:0] delay;
+   reg [31:0] delay;
    reg       scl, sda_out_ena;
    reg       sda, scl_out_ena;
    reg       ack;
-   enum      bit[3:0] {
-                       DO_IDLE,
-                       DO_START
-                       } action;
    enum      bit[2:0] { CMD_NONE, CMD_RESET, CMD_WRITE } cmd;
    enum      bit[4:0] {
                        IDLE,
@@ -58,7 +54,6 @@ module simple_i2c(
                        SEND_STOP_5,  SEND_STOP_6,  SEND_STOP_7                  
              } state = IDLE;
    reg [3:0] shift_count;
-   // reg [4:0] state = IDLE;
 
    assign sda_out = sda_out_ena && sda == 0 ? 0 : 1'bz; 
    assign scl_out = scl_out_ena && scl == 0 ? 0 : 1'bz;
@@ -89,7 +84,7 @@ module simple_i2c(
            `INIT_DELAY_CTR;
            state <= RESET_1;
         end
-        RESET_1: `DELAY_THEN(SEND_START)
+        RESET_1: `I2C_DELAY_THEN(SEND_START)
 
         // The start condition is indicated by a high-to-low transition of SDA with SCL high
         SEND_START: begin       // sda <= 1
@@ -98,19 +93,19 @@ module simple_i2c(
            state <= SEND_START_2;
            error <= 0;
         end
-        SEND_START_2: `DELAY_THEN(SEND_START_3)
+        SEND_START_2: `I2C_DELAY_THEN(SEND_START_3)
         SEND_START_3: begin     // scl <= 1
            `SCL_HIGH;
            `INIT_DELAY_CTR;
            state <= SEND_START_4;
         end
-        SEND_START_4: `DELAY_THEN(SEND_START_5)
+        SEND_START_4: `I2C_DELAY_THEN(SEND_START_5)
         SEND_START_5: begin     // sda <= 0
            `SDA_LOW;
            `INIT_DELAY_CTR;
            state <= SEND_START_6;
         end
-        SEND_START_6: `DELAY_THEN(SEND_START_7)
+        SEND_START_6: `I2C_DELAY_THEN(SEND_START_7)
         SEND_START_7: begin     // scl <= 0
            `SCL_LOW;
            state <= SEND_DATA;
@@ -122,29 +117,33 @@ module simple_i2c(
            state <= SEND_DATA_1;
         end
         SEND_DATA_1: begin
-           // `SDA_SET(shift_data[7]);   // send msb
-           sda <= shift_data[7];
-           sda_out_ena <= 1;
-           // `SDA_SET(1);   // send msb
+           `SDA_SET(shift_data[7]);   // send msb
+           // sda <= shift_data[7];
+           // sda_out_ena <= 1;
            
            shift_count <= shift_count - 1;
            `INIT_DELAY_CTR;
            state <= SEND_DATA_2;
         end
-        SEND_DATA_2: `DELAY_THEN(SEND_DATA_3)
+        SEND_DATA_2: `I2C_DELAY_THEN(SEND_DATA_3)
         SEND_DATA_3: begin
            `SCL_HIGH;
            `INIT_DELAY_CTR;
            state <= SEND_DATA_4;
         end
-        SEND_DATA_4: `DELAY_THEN(SEND_DATA_5)
+        SEND_DATA_4: `I2C_DELAY_THEN(SEND_DATA_5)
         SEND_DATA_5: begin      // while (scl == 0) ; clock stretching
-           if (scl !== 0) state <= SEND_DATA_6;
            `INIT_DELAY_CTR;
+`ifdef SIMULATION
+           state <= SEND_DATA_6;
+`else
+           // if (scl != 0) state <= SEND_DATA_6;
+           if (scl_in != 0) state <= SEND_DATA_6;
+`endif
         end
-        SEND_DATA_6: `DELAY_THEN(SEND_DATA_7)
+        SEND_DATA_6: `I2C_DELAY_THEN(SEND_DATA_7)
         SEND_DATA_7: begin
-           if (sda_in != data[7]) error <= 1;
+           if (sda_in != shift_data[7]) error <= 1;
            `SCL_LOW;
            shift_data <= shift_data << 1;
            state <= (shift_count[3]) ? READ_ACK_1 : SEND_DATA_1;
@@ -165,15 +164,19 @@ module simple_i2c(
            `INIT_DELAY_CTR;
            state <= READ_ACK_2;
         end
-        READ_ACK_2: `DELAY_THEN(READ_ACK_3)  // time for slave to set ack/nack
+        READ_ACK_2: `I2C_DELAY_THEN(READ_ACK_3)  // time for slave to set ack/nack
         READ_ACK_3: begin
            `SCL_HIGH;           // release SCL
            state <= READ_ACK_4;  // check SCL starting next clock
         end
         READ_ACK_4: begin // while self.read_SCL() == 0 ;
-           /* if (scl_in !== 0) */ state <= READ_ACK_5;
+`ifdef SIMULATION
+           state <= READ_ACK_5;
+`else
+           if (scl_in != 0) state <= READ_ACK_5;
+`endif
         end
-        READ_ACK_5: `DELAY_THEN(READ_ACK_6)
+        READ_ACK_5: `I2C_DELAY_THEN(READ_ACK_6)
         READ_ACK_6: begin
            ack <= sda_in;
            $display("ack: %0d", sda_in);
@@ -188,19 +191,19 @@ module simple_i2c(
            state <= SEND_STOP_2;
            error <= 0;
         end
-        SEND_STOP_2: `DELAY_THEN(SEND_STOP_3)
+        SEND_STOP_2: `I2C_DELAY_THEN(SEND_STOP_3)
         SEND_STOP_3: begin
            `SCL_HIGH;
            `INIT_DELAY_CTR;
            state <= SEND_STOP_4;
         end
-        SEND_STOP_4: `DELAY_THEN(SEND_STOP_5)
+        SEND_STOP_4: `I2C_DELAY_THEN(SEND_STOP_5)
         SEND_STOP_5: begin
            `SDA_HIGH;
            `INIT_DELAY_CTR;
            state <= SEND_STOP_6;
         end
-        SEND_STOP_6: `DELAY_THEN(SEND_STOP_7)
+        SEND_STOP_6: `I2C_DELAY_THEN(SEND_STOP_7)
         SEND_STOP_7: begin
            `SCL_LOW;
            if (sda_in == 0) error <= 1;
