@@ -6,15 +6,15 @@ module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
 
    assign scl = JC[0];
    assign sda = JC[1];
-   assign lcd.i2c.delay_shift = sw;
    
    hd44780 lcd(.clk(clk), .scl_in(scl), .sda_in(sda), 
                .scl_out(scl), .sda_out(sda), .busy(lcd_busy));
-   Seven_segment_LED_Display_Controller(.clock_100Mhz(clk), .reset(rst_n), 
-                                        .Anode_Activate(an), .LED_out(seg),
-                                        .displayed_number({lcd.i2c.shift_count[3:0],
-                                                           lcd.i2c.state[3:0],
-                                                           lcd.i2c.data}));
+   Seven_segment_LED_Display_Controller sevenseg(.clock_100Mhz(clk), .reset(rst_n), 
+                                                 .Anode_Activate(an), .LED_out(seg),
+                                                 .displayed_number({lcd.i2c.shift_count[3:0],
+                                                                    lcd.i2c.state[3:0],
+                                                                    lcd.i2c.data}));
+   assign lcd.i2c.delay_shift = sw;
    
    enum      bit[2:0] { RESET, RESET_1, INIT, INIT_1, WRITE, WRITE_1, WRITE_2 } state = RESET;
    reg [31:0] delay;
