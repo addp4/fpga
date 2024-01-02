@@ -1,11 +1,12 @@
-module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
+module lcdtest(input clk, input [4:0]sw, input btnC, inout [1:0]JC,
                output [15:0] led, [0:6]seg, [3:0]an );
-   wire lcd_busy, scl, sda;
+   wire lcd_busy, scl, sda, rst_n;
    localparam us = 100;
    localparam ms = us * 1000;
 
    assign scl = JC[0];
    assign sda = JC[1];
+   assign rst_n = btnC;
 
    hd44780 lcd(.clk(clk), .scl_in(scl), .sda_in(sda),
                .scl_out(scl), .sda_out(sda), .busy(lcd_busy));
@@ -54,7 +55,7 @@ module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
            if (signed'(col) < 0) begin
               col <= 19;
               row <= row + 1;
-              case (row)
+              case (row)        // DDRAM addr for start of row
                 0: lcd.vchr <= 9'b1_1000_0000;
                 1: lcd.vchr <= 9'b1_1100_0000;
                 2: lcd.vchr <= 9'b1_1001_0100;
