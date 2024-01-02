@@ -14,7 +14,7 @@
 `define SDA_LOW sda <= 0; sda_out_ena <= 1
 `define SCL_HIGH scl <= 1; scl_out_ena <= 0
 `define SCL_LOW scl <= 0; scl_out_ena <= 1
-`define INIT_DELAY_CTR delay <= (delay_cycles >> delay_shift) -2
+`define INIT_DELAY_CTR delay <= (delay_cycles << delay_shift) -2
 
 `ifdef XX
 module i2c_send_byte(input clk,
@@ -26,13 +26,13 @@ module i2c_send_byte(input clk,
                  input [7:0] data,
                  input [7:0] address,
                  output      busy);
-   
+
    enum bit[4:0] {
                   START, S1, S2, S3, S4, S5, S6, S7, S8,
                   SA, SA1,
                   IDLE
                   } state = IDLE;
-   
+
    always_ff @(posedge clk) begin
       case (state)
         IDLE: state <= IDLE;
@@ -69,19 +69,19 @@ module i2c_send_byte(input clk,
            state <= SA;
         end
 
-        SA: begin 
+        SA: begin
            data <= address << 1;
-           // state <= SA1; 
+           // state <= SA1;
         end
 
-           
+
       endcase // case (state)
    end
-   
+
 endmodule // send_byte
 `endif
-                 
-   
+
+
 module simple_i2c #(parameter SIM=0) (
     input      clk,
     input      rst_n,
@@ -94,7 +94,7 @@ module simple_i2c #(parameter SIM=0) (
     output reg error
     );
    localparam us = 100;         // cycles per microsecond @ 100MHz
-   localparam delay_cycles = SIM ? 2 : 1000000 * us; // 10Hz
+   localparam delay_cycles = SIM ? 2 : 37 * us;
    reg [7:0]   address;
    reg [7:0]   data, shift_data;
    reg [31:0]  delay;
@@ -112,13 +112,13 @@ module simple_i2c #(parameter SIM=0) (
                        /*0x12*/ SEND_START_5, SEND_START_6, SEND_START_7,
                        /*0x15*/ IDLE,         RESET,        RESET_1,
                        SEND_STOP_1,  SEND_STOP_2,  SEND_STOP_3,  SEND_STOP_4,
-                       SEND_STOP_5,  SEND_STOP_6,  SEND_STOP_7                  
+                       SEND_STOP_5,  SEND_STOP_6,  SEND_STOP_7
              } state = IDLE;
    reg [4:0] shift_count;
 
-   assign sda_out = sda_out_ena && sda == 0 ? 0 : 1'bz; 
+   assign sda_out = sda_out_ena && sda == 0 ? 0 : 1'bz;
    assign scl_out = scl_out_ena && scl == 0 ? 0 : 1'bz;
-   //assign sda_out = sda == 0 ? 0 : 1'bz; 
+   //assign sda_out = sda == 0 ? 0 : 1'bz;
    // assign scl_out = scl == 0 ? 0 : 1'bz;
    assign busy = (state != IDLE);
 
@@ -141,7 +141,7 @@ module simple_i2c #(parameter SIM=0) (
              CMD_WRITE: state <= WRITE_BYTE;
            endcase // case (cmd)
         end
-        
+
         RESET: begin
            `SCL_LOW;
            `INIT_DELAY_CTR;
@@ -234,7 +234,7 @@ module simple_i2c #(parameter SIM=0) (
            `SCL_LOW;
            state <= sda_in ? SEND_START : IDLE; // reset if nack
         end
-        
+
       endcase // case (state)
    end // always @ (posedge clk)
 endmodule

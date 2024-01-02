@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-// https://en.wikipedia.org/wiki/Hitachi_HD44780_LCD_controller 
+// https://en.wikipedia.org/wiki/Hitachi_HD44780_LCD_controller
 
 `define DELAY_THEN(next) \
    begin \
@@ -21,7 +21,7 @@ module hd44780 #(parameter SIM=0) (
    reg                rst_n = 1, we = 0;
    reg [4:0]          dindex;
    reg [7:0]          data8;
-   reg [7:0]          vchr;
+   reg [8:0]          vchr;
    reg [3:0]          init_data[14] = {4'b0011, // magic crap, first set to 8 bits by sending
                                        4'b0011, // ... 0011 three times. this is supposed to
                                        4'b0011, // ... work in any mode
@@ -43,13 +43,13 @@ module hd44780 #(parameter SIM=0) (
                        CMD_INIT,
                        CMD_WRITE
                        } cmd;
-   
+
    simple_i2c #SIM i2c(.clk(clk), .rst_n(rst_n), .write_ena(we),
                        .sda_in(sda_in), .scl_in(scl_in), .sda_out(sda_out), .scl_out(scl_out),
                        .busy(i2c_busy), .error(error));
 
    assign busy = (state != IDLE);
-   
+
    always_ff @(posedge clk) begin
       case (state)
         IDLE: begin
@@ -101,9 +101,9 @@ module hd44780 #(parameter SIM=0) (
         end
 
         WRITE_1: begin
-           i2c.data <= (vchr & 8'hf0) | 4'b1101;
+           i2c.data <= (vchr & 8'hf0) | 4'b1100 | (vchr[8] == 0);
            we <= 1;
-           delay <= SIM ? 0 : 100 * us;
+           delay <= SIM ? 0 : 1 * us;
            if (i2c_busy) state <= WRITE_2;
         end
         WRITE_2: begin
@@ -111,9 +111,9 @@ module hd44780 #(parameter SIM=0) (
            `DELAY_THEN(WRITE_3)
         end
         WRITE_3: begin
-           i2c.data <= (vchr & 8'hf0) | 4'b1001;
+           i2c.data <= (vchr & 8'hf0) | 4'b1000 | (vchr[8] == 0);
            we <= 1;
-           delay <= SIM ? 0 : 100 * us;
+           delay <= SIM ? 0 : 1 * us;
            if (i2c_busy) state <= WRITE_4;
         end
         WRITE_4: begin
@@ -121,9 +121,9 @@ module hd44780 #(parameter SIM=0) (
            `DELAY_THEN(WRITE_5)
         end
         WRITE_5: begin
-           i2c.data <= (vchr << 4) | 4'b1101;
+           i2c.data <= (vchr << 4) | 4'b1100 | (vchr[8] == 0);
            we <= 1;
-           delay <= SIM ? 0 : 100 * us;
+           delay <= SIM ? 0 : 1 * us;
            if (i2c_busy) state <= WRITE_6;
         end
         WRITE_6: begin
@@ -131,9 +131,9 @@ module hd44780 #(parameter SIM=0) (
            `DELAY_THEN(WRITE_7)
         end
         WRITE_7: begin
-           i2c.data <= (vchr << 4) | 4'b1001;
+           i2c.data <= (vchr << 4) | 4'b1000 | (vchr[8] == 0);
            we <= 1;
-           delay <= SIM ? 0 : 10000 * us;
+           delay <= SIM ? 0 : 1 * us;
            if (i2c_busy) state <= WRITE_8;
         end
         WRITE_8: begin
@@ -142,6 +142,6 @@ module hd44780 #(parameter SIM=0) (
         end
       endcase // case (state)
    end
-   
-   
+
+
 endmodule

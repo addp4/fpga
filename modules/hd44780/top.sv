@@ -6,18 +6,21 @@ module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
 
    assign scl = JC[0];
    assign sda = JC[1];
-   
-   hd44780 lcd(.clk(clk), .scl_in(scl), .sda_in(sda), 
+
+   hd44780 lcd(.clk(clk), .scl_in(scl), .sda_in(sda),
                .scl_out(scl), .sda_out(sda), .busy(lcd_busy));
-   Seven_segment_LED_Display_Controller sevenseg(.clock_100Mhz(clk), .reset(rst_n), 
+   Seven_segment_LED_Display_Controller sevenseg(.clock_100Mhz(clk), .reset(rst_n),
                                                  .Anode_Activate(an), .LED_out(seg),
                                                  .displayed_number({lcd.i2c.shift_count[3:0],
                                                                     lcd.i2c.state[3:0],
                                                                     lcd.i2c.data}));
    assign lcd.i2c.delay_shift = sw;
-   
-   enum      bit[2:0] { RESET, RESET_1, INIT, INIT_1, WRITE, WRITE_1, WRITE_2 } state = RESET;
+
+   enum      bit[2:0] { RESET, RESET_1, INIT, INIT_1, WRITE, W1, W2, W3 } state = RESET;
    reg [31:0] delay;
+   reg [7:0]  chr = 8'h20;
+   reg [5:0]  col = 19;         // count down
+   reg [1:0]  row = 0;          // 0..3
    assign led[0] = lcd.i2c.ack;
    assign led[1] = lcd.i2c.error;
    assign led[4:2] = state;
@@ -31,7 +34,6 @@ module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
       case (state)
         RESET: begin
            lcd.cmd <= lcd.CMD_IDLE;
-           lcd.vchr <= 8'b01000001;
            delay <= 1000 * ms;
            state <= RESET_1;
         end
@@ -47,17 +49,32 @@ module lcdtest(input clk, input [4:0]sw, inout [1:0]JC,
            lcd.cmd <= lcd.CMD_IDLE;
            if (!lcd_busy) state <= WRITE; // if init done
         end
+
         WRITE: begin
+           if (signed'(col) < 0) begin
+              col <= 19;
+              row <= row + 1;
+              case (row)
+                0: lcd.vchr <= 9'b1_1000_0000;
+                1: lcd.vchr <= 9'b1_1100_0000;
+                2: lcd.vchr <= 9'b1_1001_0100;
+                3: lcd.vchr <= 9'b1_1101_0100;
+              endcase
+           end
+           else begin
+              col <= col - 1;
+              lcd.vchr <= 9'(chr);
+              if (chr == 8'h7f) chr <= 8'h20;
+              else chr <= chr + 1;
+           end // else: !if(signed'(col) < 0)
+           state <= W1;
+        end
+        W1: begin
            lcd.cmd <= lcd.CMD_WRITE;
-           if (lcd_busy) state <= WRITE_1; // if write started
+           if (lcd_busy) state <= W2; // if write started
         end
-        WRITE_1: if (!lcd_busy) state <= WRITE_2; // write forever
-        WRITE_2: begin
-           if (lcd.vchr == 8'h7f) lcd.vchr <= 8'h20;
-           else lcd.vchr <= lcd.vchr + 1;
-           state <= WRITE;
-        end
+        W2: if (!lcd_busy) state <= WRITE; // write forever
       endcase // case (state)
    end
-   
+
 endmodule  // lcdtest
