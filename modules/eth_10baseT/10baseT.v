@@ -1,27 +1,14 @@
-module TENBASET_TxD(input clk, input [7:0] sw, output [3:0]JB, output [3:0]led);
+module TENBASET_TxD(input clk, input [3:0]sw, output [1:0]JB, output [3:0]led);
    // the two differential 10BASE-T outputs
    
-`ifdef xxx
    wire clk20;
-   wire locked;
-   
    clk_wiz_0 ethclock
      (
       // Clock out ports
-      .CLK_20MHZ(clk20),     // output CLK_20MHZ
-      // Status and control signals
-      .locked(locked),       // output locked
+      .CLK_20MHZ(clk20),	// output CLK_20MHZ
       // Clock in ports
-      .clk_in1(clk)      // input clk_in1
+      .clk_in1(clk)		// input clk_in1
       );
-`else
-   reg 	clk20;
-   reg 	[7:0]clkdiv;
-   always @(posedge clk) begin
-      clkdiv <= (clkdiv < sw) ? clkdiv + 1 : 0;
-      if (clkdiv == 0) clk20 <= ~clk20;
-   end
-`endif
    
 // "IP source" - put an unused IP - if unsure, see comment below after the source code
 parameter IPsource_1 = 192;
@@ -47,9 +34,12 @@ parameter PhysicalAddress_6 = 8'h01;
 
 //////////////////////////////////////////////////////////////////////
 // sends a packet roughly every second
-// reg [23:0] counter; always @(posedge clk20) counter<=counter+1;
-   reg [19:0] counter; always @(posedge clk20) counter<=counter+1;
-reg StartSending; always @(posedge clk20) StartSending<=&counter;
+reg [23:0] counter;
+reg StartSending; 
+always @(posedge clk20) begin
+   counter <= StartSending ? 0 : counter+1;
+   StartSending <= counter[23-sw] == 1;
+end
 
 //////////////////////////////////////////////////////////////////////
 // we send a UDP packet, 18 bytes payload
@@ -169,30 +159,15 @@ wire dataout = CRCflush ? ~CRC[31] : ShiftData[0];
 reg qo; always @(posedge clk20) qo <= SendingPacketData ? ~dataout^ShiftCount[0] : 1;
 reg qoe; always @(posedge clk20) qoe <= SendingPacketData | LinkPulse | (idlecount<6);
 
-   // OBUFDS: Differential Output Buffer
-   //         7 Series
-   // Xilinx HDL Language Template, version 2023.2
-   reg Ethernet_TD;
-   OBUFDS #(
-	    .IOSTANDARD("LVDS_25"), // Specify the output I/O standard
-	    .SLEW("FAST")           // Specify the output slew rate
-	    ) OBUFDS_inst (
-			   .O(JB[0]),     // Diff_p output (connect directly to top-level port)
-			   .OB(JB[1]),   // Diff_n output (connect directly to top-level port)
-			   .I(Ethernet_TD)      // Buffer input
-			   );
-   // End of OBUFDS_inst instantiation
-
-   always @(posedge clk20) Ethernet_TD <= (qoe ? qo : 1'b0);
    reg Ethernet_TDp; always @(posedge clk20) Ethernet_TDp <= (qoe ? qo : 1'b0);
    reg Ethernet_TDm; always @(posedge clk20) Ethernet_TDm <= (qoe ? ~qo : 1'b0);
-   assign JB[2] = Ethernet_TDp;
-   assign JB[3] = Ethernet_TDm;
+   assign JB[0] = Ethernet_TDp;
+   assign JB[1] = Ethernet_TDm;
 
-   reg [20:0] ctr; always @(posedge clk20) ctr <= ctr + 1;
+   reg [24:0] ctr; always @(posedge clk20) ctr <= ctr+1;
    assign led[0] = SendingPacketData;
    assign led[1] = qoe;
    assign led[2] = qo;
-   assign led[3] = ctr[20];
+   assign led[3] = ctr[24];
    
 endmodule
