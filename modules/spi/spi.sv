@@ -1,3 +1,57 @@
+module rs232ttl
+  #(parameter BAUD=115200)
+   (input  clk,
+    input  txd,
+    output rxd
+    );
+   localparam CDIV = 50000000 / (2*BAUD);
+   reg [15:0] cdiv = 0;
+   reg [4:0]  count;
+   reg [7:0] sendbyte;
+   reg       baudclock;
+   reg       sendbit = 0;
+   reg       idle = 1; // sertxd (esc,"[32m") 'green
+   localparam ESC = 27;
+   reg [7:0] fifo[14] = '{"H", "e", "l", "l", "o", ",", " ", "w", "o", "r", "l", "d", 13, 10};
+   reg [3:0] head = 0, tail = 13;
+
+   assign rxd = idle | sendbit;
+   
+   always @(posedge clk) begin
+      cdiv <= (cdiv == CDIV) ? 0 : cdiv + 1;
+      if (cdiv == CDIV) baudclock <= baudclock + 1;
+   end
+
+   always @(posedge baudclock) begin
+      if (idle) begin
+         count <= 0;
+         idle <= 0;
+         sendbyte <= fifo[head];
+         if (head == tail) head <= 0; // refill the fifo from the start
+         else head <= head + 1;
+         sendbit <= 1;
+      end else begin
+         count <= count + 1;
+         case (count)
+           0: begin
+              sendbit <= 0;       // start bit
+           end
+           1,2,3,4,5,6,7,8: begin
+              sendbit <= sendbyte & 1;
+              sendbyte <= sendbyte >> 1;
+           end
+           9: begin  // stop bit
+              sendbit <= 1;
+           end
+           default: idle <= 1;
+         endcase // case (count)
+      end // else: !if(idle)
+   end // always @ (posedge baudclock)
+
+endmodule // rs232ttl
+
+   
+
 module spi #(parameter CLK_DIV = 1000000)(
                                     input        clk,
                                     input        rst,
@@ -5,7 +59,7 @@ module spi #(parameter CLK_DIV = 1000000)(
                                     output       mosi,
                                     output       sck,
                                     input        start,
-                                    input [7:0]  data_in,
+                                    input [7:0] data_in,
                                     output [7:0] data_out,
                                     output       busy,
                                     output       new_data
@@ -261,14 +315,15 @@ module mc68008
     input               rst_n,
     input [ADDRLEN-1:0] addr_bus,
     input [2:0]         fc,
-    output              reset_oe,
     input               rw_,
     input               ds_,
     input               as_,
     input [7:0]         data_in,
     output [7:0]        data_out,
     output              data_oe,
+    output              data_dir,  // high=A->B, low=B->A
     output              cpuclk,
+    output              cpurst_n,
     output              dtack_,
     output [31:0]       status,
     output [31:0]       status2
@@ -280,7 +335,7 @@ module mc68008
    reg [2:0]                fc_latch;
    reg [7:0]                iomap[4];
    reg                      cpuclk_d;
-   reg [ADDRLEN-1:0]        addr_latch;
+   reg [ADDRLEN-1:0]        addr_latch[8];
    reg [7:0]                data_latch;
    reg                      data_latch_valid;
 
@@ -295,20 +350,21 @@ module mc68008
    assign status2[15:8] = iomap[2];
    assign status2[7:0] = iomap[3];
    
-   assign status[31:12] = addr_latch;
+   assign status[31:12] = addr_latch[5];
    assign status[11:4] = data_latch_valid ? data_latch : data_out;
-   // assign status[3:0] = fc_latch;
-   assign status[3] = reset_oe; // 8 = Reset
-   assign status[2] = ~as_;     // 4 = AS
-   assign status[1] = ~ds_;     // 2 = DS
-   assign status[0] = rw_;      // 1 = Read
+   assign status[3:0] = fc_latch;
+   //assign status[3] = reset_oe; // 8 = Reset
+   //assign status[2] = ~as_;     // 4 = AS
+   //assign status[1] = ~ds_;     // 2 = DS
+   //assign status[0] = rw_;      // 1 = Read
    // assign status[31:24] = cpu_cycles[27:20];
    assign data_oe = rw_ == 1 && ds_ == 0;
+   assign data_dir = ~rw_;
    assign cpuclk = cpuclk_d;
    assign dtack_ = 0;
    
    always @(posedge sysclk) begin
-      if (cpuclk_div == 3) begin
+      if (cpuclk_div == 1) begin
          cpuclk_div <= 0;
          cpuclk_d <= ~cpuclk_d;
       end else
@@ -319,9 +375,9 @@ module mc68008
       cpu_cycles <= cpu_cycles + 1;
       if (!rst_n) reset_ctr <= 0;
       case (reset_ctr)
-         16'hffff: reset_oe <= 0;
+         16'hffff: cpurst_n <= 1;
          default:  begin
-            reset_oe <= 1;
+            cpurst_n <= 0;
             reset_ctr <= reset_ctr + 1'b1;
          end
       endcase // case (reset_ctr)
@@ -331,30 +387,36 @@ module mc68008
       case (rw_)
         // Write cycle. Store data on data_in in "RAM".
         0: begin 
-           addr_latch <= addr_bus;
+           //if (addr_bus[19] == 0)
+             addr_latch[fc] <= addr_bus;
            data_latch <= data_in;
            data_latch_valid <= 1;
            case (addr_bus[19])
-             0: if (addr_bus[15:0] >= 16'h100) ram[addr_bus[15:0]] = data_in;
-             1: if ((addr_bus[19:0] & 20'hffffc) == 20'h81234) iomap[addr_bus[1:0]] = data_in;
+             0: ram[addr_bus[15:0]] = data_in;
+             1: if ((addr_bus[19:0] & 20'hffffc) == 20'h80034) iomap[addr_bus[1:0]] = data_in;
              // 1: iomap[addr_bus[1:0]] = data_in;
            endcase // case addr_bus[16]
         end
         
         // Read cycle. Fetch "RAM" and send it to the CPU on data_out.
         1: begin
-           addr_latch <= addr_bus;
+           //if (addr_bus[19] == 0)
+             addr_latch[fc] <= addr_bus;
  `ifndef XX
            data_out <= ram[addr_bus[15:0]];
            data_latch_valid <= 0;
  `else
            // data_out <= addr_bus[0] == 0 ? 8'hc4 : 8'hc0;
            // data_out <= addr_bus[0] == 0 ? 8'hd4 : 8'h40;
-           case (addr_bus[1:0])  // 0640 1234
-             0: data_out <= 8'h00;
-             1: data_out <= 8'h00;
-             2: data_out <= 8'h00;
-             3: data_out <= 8'h00;
+           case (addr_bus[0:0])  // 0640 1234
+             0: data_out <= 8'h52;
+             1: data_out <= 8'h84;
+             //2: data_out <= 8'h23;
+             //3: data_out <= 8'hc4;
+             // 4: data_out <= 8'h00;
+             // 5: data_out <= 8'h08;
+             // 6: data_out <= 8'h12;
+             // 7: data_out <= 8'h23;
            endcase // case (addr_bus[1:0])
            data_latch <= 0;
            data_latch_valid <= 0;
@@ -382,11 +444,17 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    max7219 disp2(.clk(CLOCK_50), .rst_n(KEY[0]), 
                  .max_din(GPIO_1[3]), .max_load(GPIO_1[4]), .max_clk(GPIO_1[5]),
                  .display_value(display_value2));
+
+
+   wire       rxd;
+   rs232ttl uart(.clk(CLOCK_50), .txd(GPIO_1[7]), .rxd(rxd));
+   assign GPIO_1[6] = rxd;
+   // assign GPIO_1[6] = !rxd ? 0 : 1'bz;
    
    reg        data_oe;
    reg [31:0] cycles;
    reg [7:0]  data_out;
-   reg        reset_oe = 1;
+   reg        cpurst_n;
    
    mc68008 cpu(
                .sysclk(CLOCK_50),
@@ -396,10 +464,11 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
                .data_in(GPIO_0[23:16]),  // pin 23 is MSB, pin 16 is LSB
                .data_out(data_out),
                .data_oe(data_oe),
+               .data_dir(GPIO_0[15]),
                .dtack_(GPIO_0[24]),
                .cpuclk(GPIO_0[25]),
                .fc(GPIO_0[28:26]),
-               .reset_oe(reset_oe),
+               .cpurst_n(cpurst_n),
                .rw_(GPIO_0[31]),
                .ds_(GPIO_0[32]),
                .as_(GPIO_0[33]),
@@ -410,20 +479,27 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    
    // assign GPIO_0[33:29] = datadir ? dataout : 8'bz;
    assign GPIO_0[33:26] = 8'bz;
-   assign GPIO_0[15:0] = 16'bz;
+   assign GPIO_0[13:0] = 14'bz;
    assign GPIO_1[6:33] = 28'bz;
 
    assign GPIO_0[23:16] = data_oe ? data_out : 8'bz;
    //assign GPIO_0[23:16] = data_out;
-   assign GPIO_0[29] = reset_oe ? 1'b0 : 1'b1; // reset
-   assign GPIO_0[30] = 1'b1; // halt
+   
+   // gpio29 and 30 are unused. they used to be reset and halt when the
+   // level shifter was bidirectional, but now it is cpu output only.
+   // the halt line is tied manually.
+   assign GPIO_0[29] = 1'bz;
+   assign GPIO_0[30] = 1'bz;
+   
+   assign GPIO_0[14] = cpurst_n;  // cpu reset line
    // assign GPIO_0[30] = reset_oe ? 1'b0 : 1'b1; // halt
 
    always @(posedge CLOCK_50) begin
       cycles <= cycles + 1;
    end
 
-   always @(posedge cycles[22]) display_value <= status;
+   always @(posedge cycles[20]) display_value <= status;
+   // always @(posedge cycles[22]) display_value <= status;
    always @(posedge cycles[20]) display_value2 <= status2;
    
 endmodule // main
