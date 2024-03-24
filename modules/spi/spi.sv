@@ -1,19 +1,23 @@
 module rs232ttl
-  #(parameter BAUD=115200)
+  // #(parameter BAUD=115200)
+  #(parameter BAUD=921600)
    (input  clk,
     input  txd,
     output rxd
     );
    localparam CDIV = 50000000 / (2*BAUD);
    reg [15:0] cdiv = 0;
-   reg [4:0]  count;
+   reg [4:0]  state;
    reg [7:0] sendbyte;
    reg       baudclock;
    reg       sendbit = 0;
    reg       idle = 1; // sertxd (esc,"[32m") 'green
+   reg [31:0] nsent;   // total bytes sent
    localparam ESC = 27;
-   reg [7:0] fifo[14] = '{"H", "e", "l", "l", "o", ",", " ", "w", "o", "r", "l", "d", 13, 10};
-   reg [3:0] head = 0, tail = 13;
+   reg [7:0] fifo[23] = '{"H", "e", "l", "l", "o", ",", " ", "w", "o", "r", "l", "d", " ",  // 13 bytes
+                          "0", "0", "0", "0", "0", "0", "0", "0", 13, 10};  // 10 bytes
+   reg [7:0] hexchar[16] = '{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"};
+   reg [7:0] head = 0, tail = 23;
 
    assign rxd = idle | sendbit;
    
@@ -24,15 +28,15 @@ module rs232ttl
 
    always @(posedge baudclock) begin
       if (idle) begin
-         count <= 0;
+         state <= 0;
          idle <= 0;
          sendbyte <= fifo[head];
          if (head == tail) head <= 0; // refill the fifo from the start
          else head <= head + 1;
          sendbit <= 1;
       end else begin
-         count <= count + 1;
-         case (count)
+         state <= state + 1;
+         case (state)
            0: begin
               sendbit <= 0;       // start bit
            end
@@ -42,8 +46,20 @@ module rs232ttl
            end
            9: begin  // stop bit
               sendbit <= 1;
+              nsent <= nsent + 1;  // total bytes copied
+              fifo[13] <= hexchar[nsent[31:28]];
+              fifo[14] <= hexchar[nsent[27:24]];
+              fifo[15] <= hexchar[nsent[23:20]];
+              fifo[16] <= hexchar[nsent[19:16]];
+              fifo[17] <= hexchar[nsent[15:12]];
+              fifo[18] <= hexchar[nsent[11:8]];
+              fifo[19] <= hexchar[nsent[7:4]];
+              fifo[20] <= hexchar[nsent[3:0]];
+              idle <= 1;
            end
-           default: idle <= 1;
+           default: begin
+              idle <= 1;
+           end
          endcase // case (count)
       end // else: !if(idle)
    end // always @ (posedge baudclock)
@@ -338,7 +354,7 @@ module mc68008
    reg [ADDRLEN-1:0]        addr_latch[8];
    reg [7:0]                data_latch;
    reg                      data_latch_valid;
-
+   
    reg [7:0]                ram[65536];
    initial begin
       $readmemh("mc68000_ram.data", ram, 0, 65535);
@@ -431,8 +447,53 @@ endmodule // mc68008
                            
                            
                            
-module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO_1);
+module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO_1,
+            output [12:0] DRAM_ADDR, 
+            inout [15:0]  DRAM_DQ,
+            output [1:0]  DRAM_BA,
+            output [1:0]  DRAM_DQM,
+            output        DRAM_RAS_N,
+            output        DRAM_CAS_N,
+            output        DRAM_CKE,
+            inout         DRAM_CLK,
+            output        DRAM_WE_N,
+            output        DRAM_CS_N
+           );
 
+   wire                   ddr_read, ddr_write, ddr_ready;
+   wire                   memclkn; // what to do with this
+   wire [1:0]             mem_dqs; // and this
+   wire [22:0]            ddr_addr;
+   wire [31:0]            ddr_wdata, ddr_rdata;
+   wire                   ddr_rdata_valid;
+
+ `ifdef DDR
+   // Critical Warning: Could not find pin of type addrcmd from pattern ddr2|alt_mem_if_civ_ddr2_emif_0|phy|*adc*|gen_odt.odt[*].odt_struct|*_rate.addr_pin|auto_generated|ddio_outa[0]|dataout
+   // Critical Warning: Could not find pin of type ck_n from pattern ddr2|alt_mem_if_civ_ddr2_emif_0|phy|clk|DDR_CLK_OUT[*].ddr_clk_out_n|auto_generated|ddio_outa[*]|dataout
+   sdram_16M16 ddr2(.pll_ref_clk(CLOCK_50),
+                    .global_reset_n(KEY[0]),
+                    .local_address(ddr_addr),
+                    .local_write_req(ddr_write),
+                    .local_wdata(ddr_wdata),
+                    .local_read_req(ddr_read),
+                    .local_rdata(ddr_rdata),
+                    .local_rdata_valid(ddr_rdata_valid),
+                    .local_ready(ddr_ready),
+                    .mem_addr(DRAM_ADDR),
+                    .mem_ba(DRAM_BA),
+                    .mem_cas_n(DRAM_CAS_N),
+                    .mem_cke(DRAM_CKE),
+                    .mem_clk(DRAM_CLK),
+                    .mem_clk_n(memclkn),
+                    .mem_cs_n(DRAM_CS_N),
+                    .mem_dm(DRAM_DQM),
+                    .mem_dq(DRAM_DQ),
+                    .mem_dqs(mem_dqs),
+                    .mem_ras_n(DRAM_RAS_N),
+                    .mem_we_n(DRAM_WE_N)
+                    );
+ `endif
+   
    wire [31:0] status, status2;
    reg [31:0] display_value, display_value2;
    wire       max_din, max_load, max_clk;
@@ -446,11 +507,14 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
                  .display_value(display_value2));
 
 
-   wire       rxd;
-   rs232ttl uart(.clk(CLOCK_50), .txd(GPIO_1[7]), .rxd(rxd));
-   assign GPIO_1[6] = rxd;
-   // assign GPIO_1[6] = !rxd ? 0 : 1'bz;
-   
+   wire       rxd1;
+   rs232ttl uart1(.clk(CLOCK_50), .txd(GPIO_1[7]), .rxd(rxd1));
+   assign GPIO_1[6] = rxd1;
+
+   wire       rxd2;
+   rs232ttl uart2(.clk(CLOCK_50), .txd(GPIO_1[9]), .rxd(rxd2));
+   assign GPIO_1[8] = rxd2;
+
    reg        data_oe;
    reg [31:0] cycles;
    reg [7:0]  data_out;
