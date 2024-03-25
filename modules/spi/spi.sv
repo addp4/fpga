@@ -1,72 +1,20 @@
-module rs232ttl
-  // #(parameter BAUD=115200)
-  #(parameter BAUD=921600)
-   (input  clk,
-    input  txd,
-    output rxd
-    );
-   localparam CDIV = 50000000 / (2*BAUD);
-   reg [15:0] cdiv = 0;
-   reg [4:0]  state;
-   reg [7:0] sendbyte;
-   reg       baudclock;
-   reg       sendbit = 0;
-   reg       idle = 1; // sertxd (esc,"[32m") 'green
-   reg [31:0] nsent;   // total bytes sent
-   localparam ESC = 27;
-   reg [7:0] fifo[23] = '{"H", "e", "l", "l", "o", ",", " ", "w", "o", "r", "l", "d", " ",  // 13 bytes
-                          "0", "0", "0", "0", "0", "0", "0", "0", 13, 10};  // 10 bytes
-   reg [7:0] hexchar[16] = '{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"};
-   reg [7:0] head = 0, tail = 23;
-
-   assign rxd = idle | sendbit;
-   
-   always @(posedge clk) begin
-      cdiv <= (cdiv == CDIV) ? 0 : cdiv + 1;
-      if (cdiv == CDIV) baudclock <= baudclock + 1;
-   end
-
-   always @(posedge baudclock) begin
-      if (idle) begin
-         state <= 0;
-         idle <= 0;
-         sendbyte <= fifo[head];
-         if (head == tail) head <= 0; // refill the fifo from the start
-         else head <= head + 1;
-         sendbit <= 1;
-      end else begin
-         state <= state + 1;
-         case (state)
-           0: begin
-              sendbit <= 0;       // start bit
-           end
-           1,2,3,4,5,6,7,8: begin
-              sendbit <= sendbyte & 1;
-              sendbyte <= sendbyte >> 1;
-           end
-           9: begin  // stop bit
-              sendbit <= 1;
-              nsent <= nsent + 1;  // total bytes copied
-              fifo[13] <= hexchar[nsent[31:28]];
-              fifo[14] <= hexchar[nsent[27:24]];
-              fifo[15] <= hexchar[nsent[23:20]];
-              fifo[16] <= hexchar[nsent[19:16]];
-              fifo[17] <= hexchar[nsent[15:12]];
-              fifo[18] <= hexchar[nsent[11:8]];
-              fifo[19] <= hexchar[nsent[7:4]];
-              fifo[20] <= hexchar[nsent[3:0]];
-              idle <= 1;
-           end
-           default: begin
-              idle <= 1;
-           end
-         endcase // case (count)
-      end // else: !if(idle)
-   end // always @ (posedge baudclock)
-
-endmodule // rs232ttl
-
-   
+/* SPI interface (no quad support)
+ 
+ Write to device: (1) set send_byte (2) set start=1 (3) poll busy starting in
+ next sysclk cycle until busy == 0. Consider if setup time for device is met
+ between (1) and (2), including that at least 1 sysclk elapses from setting mosi
+ to raising spiclk.
+ 
+ Read from device: if new_data == 1 then data is in recv_byte. this is signaled
+ every 8 spiclk, data is constantly being shifted in every clock. whether the
+ data is valid depends on the higher level protocol, i.e. a read command is in
+ progress.
+  
+ Timing is driven by the 50MHz system clock (sysclk) To run SPI faster than 1/2
+ of sysclk requires a local clock.
+  
+ TODO: fix reset so it always works
+*/
 
 module spi #(parameter CLK_DIV = 1000000)(
                                     input        clk,
@@ -75,7 +23,7 @@ module spi #(parameter CLK_DIV = 1000000)(
                                     output       mosi,
                                     output       sck,
                                     input        start,
-                                    input [7:0] data_in,
+                                    input [7:0]  data_in,
                                     output [7:0] data_out,
                                     output       busy,
                                     output       new_data
@@ -84,7 +32,8 @@ module spi #(parameter CLK_DIV = 1000000)(
    localparam STATE_SIZE = 2;
    localparam IDLE = 2'd0,
      SCK_LO = 2'd1,
-     SCK_HI = 2'd2;
+     SCK_HI = 2'd2,
+     DATA_INTR = 2'd3;
    
    reg [STATE_SIZE-1:0]                          state_d, state_q;
    
@@ -115,7 +64,7 @@ module spi #(parameter CLK_DIV = 1000000)(
       
       case (state_q)
         IDLE: begin
-           sck_d = 0;                 // reset clock counter
+           sck_d = 1;                 // reset clock counter
            ctr_d = 3'b0;              // reset bit counter
            if (start == 1'b1) begin   // if start command
               data_d = data_in;       // latch data to send
@@ -138,15 +87,19 @@ module spi #(parameter CLK_DIV = 1000000)(
               data_d = {data_q[6:0], miso};                 // read in data (shift in)
               ctr_d = ctr_q + 1'b1;                         // increment bit counter
               if (ctr_q == 3'b111) begin                    // if we are on the last bit
-                 state_d = IDLE;                             // change state
-                 data_out_d = data_q;                        // output data
-                 new_data_d = 1'b1;                          // signal data is valid
+                 state_d = DATA_INTR;                       // change state
+                 // data_out_d = data_q;                    // output data
+                 data_out_d = {data_q[6:0], miso};          // output data
               end
               else begin
-                 sck_d = 0;
+                 sck_d = 1;
                  state_d = SCK_LO;
               end
            end
+        end // case: SCK_HI
+        DATA_INTR: begin
+           new_data_d = 1'b1;                          // signal data is valid
+           state_d = IDLE;
         end
       endcase
    end
@@ -174,18 +127,12 @@ module spi #(parameter CLK_DIV = 1000000)(
 endmodule
 
 
-/*
- module max7219(input clk, input rst, input miso, output mosi, output sck, output load, input [7:0]addr, input [7:0]data, input start, output busy);
+/* Continuously display a 32-bit value on 8-digit LED module with max7219+SPI interface
  
- wire new_data;
- reg [7:0] data_in;
- wire [7:0] data_out;
- 
- endmodule // max7219
- */
+ TODO: fix reset so it works for any messed up state SPI is in
+*/
 
-
-module max7219(input clk, input rst_n, output max_din, output max_load, output max_clk, input [31:0]display_value);
+module max7219(input clk, input rst_n, output max_din, output ce_, output max_clk, input [31:0]display_value);
 
    wire [7:0] data_out;
    reg [7:0]  data;
@@ -198,6 +145,8 @@ module max7219(input clk, input rst_n, output max_din, output max_load, output m
    reg [4:0]    addr;
    reg [31:0]   disp_dig;
    reg [7:0]    LED_out;
+   reg          max_load;
+   assign ce_ = max_load;
    
    localparam DECODEMODE_ADDR = 9;
    localparam BRIGHTNESS_ADDR = 10;
@@ -228,13 +177,10 @@ module max7219(input clk, input rst_n, output max_din, output max_load, output m
                     .data_out(data_out),
                     .busy(busy)
                     );
-   reg [31:0]   cycles;
    
    assign rst = ~rst_n;
 
    always @(posedge clk) begin
-      cycles <= cycles + 1;
-      
       case (state)
         INIT: begin
            pinit <= 0;
@@ -268,12 +214,13 @@ module max7219(input clk, input rst_n, output max_din, output max_load, output m
            max_load <= 1;
            state <= (pinit < 12) ? INIT1 : INIT_DONE;
         end
-        // Formally, we're done with init here. But use the loop to
-        // iterate through numbers as well. We'll update only one
-        // digit per cycle. The digit is selected by addr, where 1 is
-        // the rightmost digit on the display, hence the low 4 bits of
-        // disp_num. After doing all the digits, we increment
-        // disp_num.
+        // Use the init loop to iterate through the 8-digit value on
+        // the display since that is already about writing 8 bit
+        // values. One digit (8 bits) is sent per "init". The low 4
+        // bits of disp_num are mapped to a segment code. addr counts
+        // the digits from 1 to 8 and disp_num is shifted right 4 per
+        // digit. When addr reaches 8 a new display value is latched
+        // and addr resets to 1.
         INIT_DONE: begin
            pinit <= 12;
            maxinit[12] <= addr;
@@ -284,8 +231,7 @@ module max7219(input clk, input rst_n, output max_din, output max_load, output m
               disp_dig <= disp_dig >> 4;
            end else begin
               addr <= 1;
-              disp_dig <= display_value;  // cycles;
-              // disp_dig <= cycles;
+              disp_dig <= display_value;
            end
            state <= rst ? INIT : INIT1;
         end // case: INIT_DONE
@@ -317,12 +263,12 @@ module max7219(input clk, input rst_n, output max_din, output max_load, output m
 endmodule // max7219
 
 
-module dff(input d, input clk, input rst_n, output reg q);
+module myydff(input d, input clk, input rst_n, output reg q);
    
    always @(posedge clk or negedge rst_n)
      q <= !rst_n ? 0 : d;
 
-endmodule // dff
+endmodule // mydff (D-type flip flop)
 
    
 module mc68008
@@ -335,7 +281,7 @@ module mc68008
     input               ds_,
     input               as_,
     input [7:0]         data_in,
-    output [7:0]        data_out,
+    output [7:0]        data_out_q,
     output              data_oe,
     output              data_dir,  // high=A->B, low=B->A
     output              cpuclk,
@@ -350,9 +296,9 @@ module mc68008
    reg [15:0]               reset_ctr = 0;
    reg [2:0]                fc_latch;
    reg [7:0]                iomap[4];
-   reg                      cpuclk_d;
+   reg                      cpuclk_d, cpurst_d;
    reg [ADDRLEN-1:0]        addr_latch[8];
-   reg [7:0]                data_latch;
+   reg [7:0]                data_latch, data_out;
    reg                      data_latch_valid;
    
    reg [7:0]                ram[65536];
@@ -378,6 +324,8 @@ module mc68008
    assign data_dir = ~rw_;
    assign cpuclk = cpuclk_d;
    assign dtack_ = 0;
+   assign cpurst_n = cpurst_d;
+   assign data_out_q = data_out;
    
    always @(posedge sysclk) begin
       if (cpuclk_div == 1) begin
@@ -391,9 +339,9 @@ module mc68008
       cpu_cycles <= cpu_cycles + 1;
       if (!rst_n) reset_ctr <= 0;
       case (reset_ctr)
-         16'hffff: cpurst_n <= 1;
+         16'hffff: cpurst_d <= 1;
          default:  begin
-            cpurst_n <= 0;
+            cpurst_d <= 0;
             reset_ctr <= reset_ctr + 1'b1;
          end
       endcase // case (reset_ctr)
@@ -448,6 +396,7 @@ endmodule // mc68008
                            
                            
 module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO_1,
+            output        [0:7]LED,
             output [12:0] DRAM_ADDR, 
             inout [15:0]  DRAM_DQ,
             output [1:0]  DRAM_BA,
@@ -499,11 +448,11 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    wire       max_din, max_load, max_clk;
    
    max7219 disp(.clk(CLOCK_50), .rst_n(KEY[0]), 
-                .max_din(GPIO_1[0]), .max_load(GPIO_1[1]), .max_clk(GPIO_1[2]),
+                .max_din(GPIO_1[0]), .ce_(GPIO_1[1]), .max_clk(GPIO_1[2]),
                 .display_value(display_value));
    
    max7219 disp2(.clk(CLOCK_50), .rst_n(KEY[0]), 
-                 .max_din(GPIO_1[3]), .max_load(GPIO_1[4]), .max_clk(GPIO_1[5]),
+                 .max_din(GPIO_1[3]), .ce_(GPIO_1[4]), .max_clk(GPIO_1[5]),
                  .display_value(display_value2));
 
 
@@ -515,10 +464,13 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    rs232ttl uart2(.clk(CLOCK_50), .txd(GPIO_1[9]), .rxd(rxd2));
    assign GPIO_1[8] = rxd2;
 
+   aps6406 psram(.sysclk(CLOCK_50), .rst_n(KEY[0]), .spiclk(GPIO_0[1]),
+                 .mosi(GPIO_0[3]), .miso(GPIO_0[5]), .ce_q_(GPIO_0[2]), .led_q(LED));
+   
    reg        data_oe;
    reg [31:0] cycles;
    reg [7:0]  data_out;
-   reg        cpurst_n;
+   wire       cpurst_n;
    
    mc68008 cpu(
                .sysclk(CLOCK_50),
@@ -526,7 +478,7 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
                .addr_bus(GPIO_1[14:33]),  // pin 14 is MSB, pin 33 is LSB
                // .data_in(GPIO_0[23:16]),  // pin 23 is MSB, pin 16 is LSB
                .data_in(GPIO_0[23:16]),  // pin 23 is MSB, pin 16 is LSB
-               .data_out(data_out),
+               .data_out_q(data_out),
                .data_oe(data_oe),
                .data_dir(GPIO_0[15]),
                .dtack_(GPIO_0[24]),
@@ -543,7 +495,8 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    
    // assign GPIO_0[33:29] = datadir ? dataout : 8'bz;
    assign GPIO_0[33:26] = 8'bz;
-   assign GPIO_0[13:0] = 14'bz;
+   assign GPIO_0[13:8] = 14'bz;
+   assign GPIO_0[5] = 1'bz;     // MISO pin in SPI mode. pin 2 on device <=> pin 5 on GPIO0
    assign GPIO_1[6:33] = 28'bz;
 
    assign GPIO_0[23:16] = data_oe ? data_out : 8'bz;
