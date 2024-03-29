@@ -444,9 +444,10 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
  `endif
    
    wire [31:0] status, status2;
-   reg [31:0] display_value, display_value2;
+   reg [31:0] display_value, display_value2, ramstatus;
    wire       max_din, max_load, max_clk;
-   
+
+   // 8-digit seven-segment drivers (x2)
    max7219 disp(.clk(CLOCK_50), .rst_n(KEY[0]), 
                 .max_din(GPIO_1[0]), .ce_(GPIO_1[1]), .max_clk(GPIO_1[2]),
                 .display_value(display_value));
@@ -455,7 +456,7 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
                  .max_din(GPIO_1[3]), .ce_(GPIO_1[4]), .max_clk(GPIO_1[5]),
                  .display_value(display_value2));
 
-
+   // RS232 driver module (x2)
    wire       rxd1;
    rs232ttl uart1(.clk(CLOCK_50), .txd(GPIO_1[7]), .rxd(rxd1));
    assign GPIO_1[6] = rxd1;
@@ -464,14 +465,26 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    rs232ttl uart2(.clk(CLOCK_50), .txd(GPIO_1[9]), .rxd(rxd2));
    assign GPIO_1[8] = rxd2;
 
+   // PSRAM module
    aps6406 psram(.sysclk(CLOCK_50), .rst_n(KEY[0]), .spiclk(GPIO_0[1]),
-                 .mosi(GPIO_0[3]), .miso(GPIO_0[5]), .ce_q_(GPIO_0[2]), .led_q(LED));
+                 .mosi(GPIO_0[3]), .miso(GPIO_0[5]), .ce_q_(GPIO_0[2]),
+                 .led_q(LED), .ramstatus(ramstatus));
    
    reg        data_oe;
-   reg [31:0] cycles;
+   reg [63:0] cycles;
    reg [7:0]  data_out;
    wire       cpurst_n;
-   
+
+   // ALTPLL for bb
+   wire       clock_100, clock_150, clock_200;
+   pll1 bbclk(.inclk0(CLOCK_50), .c0(clock_100), .c1(clock_150), .c2(clock_200));
+
+   // Busybeaver module
+   wire [63:0] bb_count;
+   wire        bb_halt;
+   busybeaver_143space bb(.clk(clock_200), .rst_n(KEY[0]), .count(bb_count), .halt(bb_halt));
+
+   // 68008 cpu module
    mc68008 cpu(
                .sysclk(CLOCK_50),
                .rst_n(KEY[1]),
@@ -515,8 +528,12 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
       cycles <= cycles + 1;
    end
 
-   always @(posedge cycles[20]) display_value <= status;
-   // always @(posedge cycles[22]) display_value <= status;
+   // always @(posedge cycles[20]) display_value <= status;
+   // always @(posedge cycles[20]) display_value <= ramstatus;
+   always @(posedge cycles[20]) begin
+      if (cycles[26]) display_value <= bb_count[63:32];
+      else display_value <= bb_count[31:0];
+   end
    always @(posedge cycles[20]) display_value2 <= status2;
    
 endmodule // main

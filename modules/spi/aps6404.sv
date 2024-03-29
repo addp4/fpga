@@ -13,7 +13,7 @@
 */
 
 module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso, output ce_q_,
-               output [7:0]led_q);
+               output [7:0]led_q, output[31:0] ramstatus);
 //output mosiq[3:0], input misoq[3:0], output we);
    
    wire [7:0]              recv_byte;
@@ -28,24 +28,30 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
    enum                    { POR, RESET, RESET_0, RESET_1, RESET_2, RESET_3, RESET_4,
                              READID, READID_1, READID_A1, READID_A1BUSY, READID_A2, READID_A2BUSY,
                              READID_A3, READID_A3BUSY, READID_ID, READID_ID_RD, READID_END,
+                             MEMTEST, MT0, MT1, MTA1, MTA1_W, MTA2, MTA2_W, MTA3, MTA3_W,
+                             MTD1, MTD1_W, MTD2,
                              INIT
                              } state_t;
    reg [5:0]               state = POR;
-   reg [4:0]               addr;
+   reg [23:0]              addr = 0;
    reg [7:0]               led;
    reg [15:0]              delay_cnt; // count to POR_CYCLES
+   reg [31:0]              ramstatus_d;
  
    assign led_q = led;
    assign ce_q_ = ce_;
+   // assign ramstatus = {kgd, addr};
+   assign ramstatus = {mfid, kgd, eid};
    
    localparam POR_CYCLES = 50 * 150; // 50MHz clk cycles for 150 microseconds delay
    localparam                        // device commands
+     CMD_WRITE = 8'h2,
+     CMD_READ = 8'h3,
      CMD_RSTEN = 8'h66,
      CMD_RST = 8'h99,
-     CMD_READID = 8'h9f
-                      ;
+     CMD_READID = 8'h9f;
  
-   spi #(10) psram(.clk(sysclk),
+   spi #(100) psram(.clk(sysclk),
                    .rst(rst),
                    .miso(miso),
                    .mosi(mosi),
@@ -109,7 +115,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
         
         READID: begin
            send_byte <= CMD_READID;
-           ce_ <= 0;
+           ce_ <= 0;            // start command
            spi_start <= 1;
            state <= READID_1;
         end
@@ -163,9 +169,66 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
         end
         READID_END: begin
            ce_ <= 1;
-           state <= INIT;
+           //state <= MEMTEST;
+           state <= RESET;
         end
-          
+
+        MEMTEST: begin
+           led <= mfid;
+           state <= MT0;
+        end
+        MT0: begin
+           send_byte <= CMD_WRITE;
+           ce_ = 0;             // start command
+           spi_start <= 1;
+           state <= MT1;
+        end
+        MT1: begin
+           spi_start <= 0;
+           if (busy == 0) state <= MTA1;
+        end
+        MTA1: begin  // send address
+           send_byte <= addr[23:16];
+           spi_start <= 1;
+           state <= MTA1_W;
+        end
+        MTA1_W: begin
+           spi_start <= 0;
+           if (busy == 0) state <= MTA2;
+        end
+        MTA2: begin  // send address
+           send_byte <= addr[15:8];
+           spi_start <= 1;
+           state <= MTA2_W;
+        end
+        MTA2_W: begin
+           spi_start <= 0;
+           if (busy == 0) state <= MTA3;
+        end
+        MTA3: begin  // send address
+           send_byte <= addr[7:0];
+           spi_start <= 1;
+           state <= MTA3_W;
+        end
+        MTA3_W: begin
+           spi_start <= 0;
+           if (busy == 0) state <= MTD1;
+        end
+        MTD1: begin  // send data
+           send_byte <= 0;
+           spi_start <= 1;
+           state <= MTD1_W;
+        end
+        MTD1_W: begin
+           spi_start <= 0;
+           if (busy == 0) state <= MTD2;
+        end
+        MTD2: begin
+           ce_ = 1;  // end command
+           addr <= addr + 1;
+           state <= (addr & 16'hffff) == 0 ? READID : MEMTEST;
+        end
+        
         INIT: begin
            led <= eid;
            ce_ <= 1;
