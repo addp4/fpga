@@ -34,7 +34,7 @@ module busybeaver_37space(input clk,
       if (!halt_q) count_d <= count_d + 1;
    end
 
-   // |state A----------| |state B----------|   time            space 
+   // A0  A1  A2  A3  A4  B0  B1  B2  B3  B4    s(M)            σ(M)
    // 1RB 4LA 1LA 1RH 2RB 2LB 3LA 1LB 2RA 0RB   7,021,292,621   37
    // >>> hex(7021292621) = '0x1a2806c4d'
    always @(*) begin
@@ -43,7 +43,7 @@ module busybeaver_37space(input clk,
       next <= A;
       dir <= R;
       case (state)
-        A: begin 
+        A: begin      // 1RB 4LA 1LA 1RH 2RB
            case (sym)
              0: begin
                 newsym <= 1;
@@ -75,9 +75,7 @@ module busybeaver_37space(input clk,
              end
            endcase // case (sym)
         end // case: A
-        // -----state A------- -----state B-------
-        // 1RB 4LA 1LA 1RH 2RB 2LB 3LA 1LB 2RA 0RB 7,021,292,621 37
-        B: begin
+        B: begin     // 2LB 3LA 1LB 2RA 0RB
            case (sym)
              0: begin
                 newsym <= 2;
@@ -154,15 +152,14 @@ module busybeaver_143space(input clk,
       pos <= (dir == L) ? pos - 1 : pos + 1;
       if (!halt_q) count_d <= count_d + 1;
    end
-
-   // 1RB 3LA 1LA 4LA 1RA
+   
    always @(*) begin
       halt_d = 0;
       newsym <= 0;
       next <= A;
       dir <= R;
       case (state)
-        A: begin 
+        A: begin   // 1RB 3LA 1LA 4LA 1RA
            case (sym)
              0: begin
                 newsym <= 1;
@@ -196,8 +193,7 @@ module busybeaver_143space(input clk,
              end
            endcase // case (sym)
         end // case: A
-        //  2LB 2RA 1RH 0RA 0RB
-        B: begin
+        B: begin  // 2LB 2RA 1RH 0RA 0RB
            case (sym)
              0: begin
                 newsym <= 2;
