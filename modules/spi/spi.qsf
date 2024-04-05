@@ -222,13 +222,13 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0[0]
 set_location_assignment PIN_B8 -to GPIO_0_IN[1]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0_IN[1]
 set_location_assignment PIN_C3 -to GPIO_0[1]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to GPIO_0[1]
 set_location_assignment PIN_A2 -to GPIO_0[2]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0[2]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to GPIO_0[2]
 set_location_assignment PIN_A3 -to GPIO_0[3]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0[3]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to GPIO_0[3]
 set_location_assignment PIN_B3 -to GPIO_0[4]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0[4]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to GPIO_0[4]
 set_location_assignment PIN_B4 -to GPIO_0[5]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_0[5]
 set_location_assignment PIN_A4 -to GPIO_0[6]
@@ -373,6 +373,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to GPIO_1
 
 set_global_assignment -name EDA_SIMULATION_TOOL "ModelSim-Altera (SystemVerilog)"
 set_global_assignment -name EDA_OUTPUT_DATA_FORMAT "SYSTEMVERILOG HDL" -section_id eda_simulation
+set_global_assignment -name SYSTEMVERILOG_FILE ../max7219/max7219.sv
 set_global_assignment -name SYSTEMVERILOG_FILE busybeaver.sv
 set_global_assignment -name SYSTEMVERILOG_FILE aps6404.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rs232ttl.sv
@@ -381,4 +382,14 @@ set_global_assignment -name CDF_FILE ../max2/output_files/Chain4.cdf
 set_global_assignment -name CDF_FILE ../max2/output_files/Chain6.cdf
 set_global_assignment -name CDF_FILE ../max2/output_files/Chain9.cdf
 set_global_assignment -name QIP_FILE pll1.qip
+set_global_assignment -name SOURCE_FILE db/spi.cmp.rdb
+set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "2.5 V"
+set_global_assignment -name USE_CONFIGURATION_DEVICE OFF
+set_global_assignment -name CRC_ERROR_OPEN_DRAIN OFF
+set_global_assignment -name RESERVE_ALL_UNUSED_PINS_WEAK_PULLUP "AS INPUT TRI-STATED"
+set_global_assignment -name OUTPUT_IO_TIMING_NEAR_END_VMEAS "HALF VCCIO" -rise
+set_global_assignment -name OUTPUT_IO_TIMING_NEAR_END_VMEAS "HALF VCCIO" -fall
+set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -rise
+set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -fall
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR OFF -to GPIO_0[5]
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

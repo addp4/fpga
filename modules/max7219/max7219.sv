@@ -1,3 +1,21 @@
+/* SPI interface (no quad support)
+ 
+ Write to device: (1) set send_byte (2) set start=1 (3) poll busy starting in
+ next sysclk cycle until busy == 0. Consider if setup time for device is met
+ between (1) and (2), including that at least 1 sysclk elapses from setting mosi
+ to raising spiclk.
+ 
+ Read from device: if new_data == 1 then data is in recv_byte. this is signaled
+ every 8 spiclk, data is constantly being shifted in every clock. whether the
+ data is valid depends on the higher level protocol, i.e. a read command is in
+ progress.
+  
+ Timing is driven by the 50MHz system clock (sysclk) To run SPI faster than 1/2
+ of sysclk requires a local clock.
+  
+ TODO: fix reset so it always works
+*/
+
 module spi #(parameter CLK_DIV = 1000000)(
                                     input        clk,
                                     input        rst,
@@ -14,7 +32,8 @@ module spi #(parameter CLK_DIV = 1000000)(
    localparam STATE_SIZE = 2;
    localparam IDLE = 2'd0,
      SCK_LO = 2'd1,
-     SCK_HI = 2'd2;
+     SCK_HI = 2'd2,
+     DATA_INTR = 2'd3;
    
    reg [STATE_SIZE-1:0]                          state_d, state_q;
    
@@ -45,7 +64,7 @@ module spi #(parameter CLK_DIV = 1000000)(
       
       case (state_q)
         IDLE: begin
-           sck_d = 0;                 // reset clock counter
+           sck_d = 1;                 // reset clock counter
            ctr_d = 3'b0;              // reset bit counter
            if (start == 1'b1) begin   // if start command
               data_d = data_in;       // latch data to send
@@ -67,16 +86,23 @@ module spi #(parameter CLK_DIV = 1000000)(
            if (sck_q >= CLK_DIV) begin                   
               data_d = {data_q[6:0], miso};                 // read in data (shift in)
               ctr_d = ctr_q + 1'b1;                         // increment bit counter
+              sck_d = 1;
               if (ctr_q == 3'b111) begin                    // if we are on the last bit
-                 state_d = IDLE;                             // change state
-                 data_out_d = data_q;                        // output data
-                 new_data_d = 1'b1;                          // signal data is valid
+                 state_d = DATA_INTR;                       // change state
+                 // data_out_d = data_q;                    // output data
+                 data_out_d = {data_q[6:0], miso};          // output data
               end
               else begin
-                 sck_d = 0;
+                 // sck_d = 1;
                  state_d = SCK_LO;
               end
            end
+        end // case: SCK_HI
+        DATA_INTR: begin
+           new_data_d = 1'b1;                          // signal data is valid
+           // pause a bit between bytes
+           sck_d = sck_q + 1'b1;                           // increment clock counter
+           if (sck_q >= (CLK_DIV/2)) state_d = IDLE;
         end
       endcase
    end
@@ -104,18 +130,12 @@ module spi #(parameter CLK_DIV = 1000000)(
 endmodule
 
 
-/*
- module max7219(input clk, input rst, input miso, output mosi, output sck, output load, input [7:0]addr, input [7:0]data, input start, output busy);
+/* Continuously display a 32-bit value on 8-digit LED module with max7219+SPI interface
  
- wire new_data;
- reg [7:0] data_in;
- wire [7:0] data_out;
- 
- endmodule // max7219
- */
+ TODO: fix reset so it works for any messed up state SPI is in
+*/
 
-
-module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, output max_clk);
+module max7219(input clk, input rst_n, output max_din, output ce_, output max_clk, input [31:0]display_value);
 
    wire [7:0] data_out;
    reg [7:0]  data;
@@ -128,6 +148,8 @@ module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, out
    reg [4:0]    addr;
    reg [31:0]   disp_dig;
    reg [7:0]    LED_out;
+   reg          max_load;
+   assign ce_ = max_load;
    
    localparam DECODEMODE_ADDR = 9;
    localparam BRIGHTNESS_ADDR = 10;
@@ -142,12 +164,12 @@ module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, out
                   SCANLIMIT_ADDR, 7,
                   DECODEMODE_ADDR, 0,
                   SHUTDOWN_ADDR, 1,
-                  BRIGHTNESS_ADDR, 12,
+                  BRIGHTNESS_ADDR, 7,
                   1, 8'h0      // byte 12-13
                   };
    reg [4:0]    pinit;
 
-   spi #(10) max7219(.clk(CLOCK_50),
+   spi #(10) max7219(.clk(clk),
                     .rst(rst),
                     .miso(miso_ignored),
                     .mosi(max_din),
@@ -158,13 +180,10 @@ module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, out
                     .data_out(data_out),
                     .busy(busy)
                     );
-   reg [31:0]   cycles;
    
    assign rst = ~rst_n;
 
-   always @(posedge CLOCK_50) begin
-      cycles <= cycles + 1;
-      
+   always @(posedge clk) begin
       case (state)
         INIT: begin
            pinit <= 0;
@@ -198,12 +217,13 @@ module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, out
            max_load <= 1;
            state <= (pinit < 12) ? INIT1 : INIT_DONE;
         end
-        // Formally, we're done with init here. But use the loop to
-        // iterate through numbers as well. We'll update only one
-        // digit per cycle. The digit is selected by addr, where 1 is
-        // the rightmost digit on the display, hence the low 4 bits of
-        // disp_num. After doing all the digits, we increment
-        // disp_num.
+        // Use the init loop to iterate through the 8-digit value on
+        // the display since that is already about writing 8 bit
+        // values. One digit (8 bits) is sent per "init". The low 4
+        // bits of disp_num are mapped to a segment code. addr counts
+        // the digits from 1 to 8 and disp_num is shifted right 4 per
+        // digit. When addr reaches 8 a new display value is latched
+        // and addr resets to 1.
         INIT_DONE: begin
            pinit <= 12;
            maxinit[12] <= addr;
@@ -214,13 +234,13 @@ module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, out
               disp_dig <= disp_dig >> 4;
            end else begin
               addr <= 1;
-              disp_dig <= cycles;
+              disp_dig <= display_value;
            end
            state <= rst ? INIT : INIT1;
         end // case: INIT_DONE
         
       endcase // case (state)
-   end // always @ (posedge CLOCK_50)
+   end // always @ (posedge clk)
 
    always @(*) begin
            case(disp_dig & 4'hf)
@@ -244,12 +264,4 @@ module max7219(input CLOCK_50, input rst_n, output max_din, output max_load, out
            endcase // case (disp_dig & 8'hf)
    end
 endmodule // max7219
-
-
-
-module main(input CLOCK_50, input [1:0]KEY, output [33:0]GPIO_1);
-
-   max7219 disp(CLOCK_50, KEY[0], GPIO_1[0], GPIO_1[1], GPIO_1[3]);
-   
-endmodule // main
 

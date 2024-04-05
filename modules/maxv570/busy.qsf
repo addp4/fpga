@@ -45,7 +45,6 @@ set_global_assignment -name LAST_QUARTUS_VERSION 13.1
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
 set_global_assignment -name EDA_SIMULATION_TOOL "ModelSim-Altera (VHDL)"
 set_global_assignment -name EDA_OUTPUT_DATA_FORMAT VHDL -section_id eda_simulation
-set_global_assignment -name SYSTEMVERILOG_FILE busy.sv
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
 set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
@@ -56,6 +55,15 @@ set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "3.3-V LVTTL"
 
 set_location_assignment PIN_20 -to SW_USER_1
 set_location_assignment PIN_21 -to SW_USER_2
+set_location_assignment PIN_28 -to TR_OE_2
+set_location_assignment PIN_86 -to TR_OE_1
+set_location_assignment PIN_74 -to TR_OE_3
+set_location_assignment PIN_73 -to TR_OE_4
+set_location_assignment PIN_26 -to TR_OE_5
+set_location_assignment PIN_12 -to CLK_66MHZ
+set_location_assignment PIN_44 -to RST
+set_location_assignment PIN_19 -to UART_IN
+set_location_assignment PIN_18 -to UART_OUT
 set_location_assignment PIN_56 -to LED_1_BLUE
 set_location_assignment PIN_57 -to LED_1_GREEN
 set_location_assignment PIN_55 -to LED_1_RED
@@ -68,41 +76,13 @@ set_location_assignment PIN_49 -to LED_3_RED
 set_location_assignment PIN_47 -to LED_4_BLUE
 set_location_assignment PIN_48 -to LED_4_GREEN
 set_location_assignment PIN_43 -to LED_4_RED
-set_location_assignment PIN_61 -to LB_IOL[0]
-set_location_assignment PIN_66 -to LB_IOL[1]
-set_location_assignment PIN_67 -to LB_IOL[2]
-set_location_assignment PIN_68 -to LB_IOL[3]
-set_location_assignment PIN_69 -to LB_IOL[4]
-set_location_assignment PIN_70 -to LB_IOL[5]
-set_location_assignment PIN_71 -to LB_IOL[6]
-set_location_assignment PIN_72 -to LB_IOL[7]
-set_location_assignment PIN_47 -to LB_IOHA[0]
-set_location_assignment PIN_48 -to LB_IOHA[1]
-set_location_assignment PIN_49 -to LB_IOHA[2]
-set_location_assignment PIN_50 -to LB_IOHA[3]
-set_location_assignment PIN_55 -to LB_IOHA[4]
-set_location_assignment PIN_56 -to LB_IOHA[5]
-set_location_assignment PIN_57 -to LB_IOHA[6]
-set_location_assignment PIN_58 -to LB_IOHA[7]
-set_location_assignment PIN_62 -to LB_IOHB[0]
-set_location_assignment PIN_64 -to LB_IOHB[1]
-set_location_assignment PIN_43 -to LB_IOHB[2]
-set_location_assignment PIN_81 -to LB_IO9[0]
-set_location_assignment PIN_82 -to LB_IO9[1]
-set_location_assignment PIN_83 -to LB_IO9[2]
-set_location_assignment PIN_84 -to LB_IO9[3]
-set_location_assignment PIN_78 -to LB_IO9[4]
-set_location_assignment PIN_77 -to LB_IO9[5]
-set_location_assignment PIN_76 -to LB_IO9[6]
-set_location_assignment PIN_75 -to LB_IO9[7]
-set_location_assignment PIN_33 -to LB_IO8[0]
-set_location_assignment PIN_34 -to LB_IO8[1]
-set_location_assignment PIN_35 -to LB_IO8[2]
-set_location_assignment PIN_36 -to LB_IO8[3]
-set_location_assignment PIN_38 -to LB_IO8[4]
-set_location_assignment PIN_40 -to LB_IO8[5]
-set_location_assignment PIN_41 -to LB_IO8[6]
-set_location_assignment PIN_42 -to LB_IO8[7]
+set_location_assignment PIN_27 -to TR_DIR_5
+set_location_assignment PIN_30 -to TR_DIR_4
+set_location_assignment PIN_29 -to TR_DIR_2
+set_location_assignment PIN_85 -to TR_DIR_3
+set_location_assignment PIN_100 -to TR_DIR_1
+set_location_assignment PIN_16 -to SLIDE_SWITCH_1
+set_location_assignment PIN_17 -to SLIDE_SWITCH_2
 set_location_assignment PIN_1 -to LB_COMM[0]
 set_location_assignment PIN_2 -to LB_COMM[1]
 set_location_assignment PIN_3 -to LB_COMM[2]
@@ -111,20 +91,44 @@ set_location_assignment PIN_5 -to LB_COMM[4]
 set_location_assignment PIN_6 -to LB_COMM[5]
 set_location_assignment PIN_7 -to LB_COMM[6]
 set_location_assignment PIN_15 -to LB_COMM[7]
-set_location_assignment PIN_86 -to TR_OE_1
-set_location_assignment PIN_28 -to TR_OE_2
-set_location_assignment PIN_74 -to TR_OE_3
-set_location_assignment PIN_73 -to TR_OE_4
-set_location_assignment PIN_26 -to TR_OE_5
-set_location_assignment PIN_100 -to TR_DIR_1
-set_location_assignment PIN_29 -to TR_DIR_2
-set_location_assignment PIN_85 -to TR_DIR_3
-set_location_assignment PIN_30 -to TR_DIR_4
-set_location_assignment PIN_27 -to TR_DIR_5
-set_location_assignment PIN_19 -to UART_IN
-set_location_assignment PIN_18 -to UART_OUT
-set_location_assignment PIN_44 -to RST
-set_location_assignment PIN_12 -to CLK_66MHZ
+set_location_assignment PIN_33 -to LB_AD[0]
+set_location_assignment PIN_34 -to LB_AD[1]
+set_location_assignment PIN_35 -to LB_AD[2]
+set_location_assignment PIN_36 -to LB_AD[3]
+set_location_assignment PIN_38 -to LB_AD[4]
+set_location_assignment PIN_40 -to LB_AD[5]
+set_location_assignment PIN_41 -to LB_AD[6]
+set_location_assignment PIN_42 -to LB_AD[7]
+set_location_assignment PIN_58 -to LB_XIOH[0]
+set_location_assignment PIN_61 -to LB_XIOH[1]
+set_location_assignment PIN_62 -to LB_XIOH[2]
+set_location_assignment PIN_64 -to LB_XIOH[3]
+set_location_assignment PIN_66 -to LB_XIOH[4]
+set_location_assignment PIN_67 -to LB_XIOH[5]
+set_location_assignment PIN_68 -to LB_XIOH[6]
+set_location_assignment PIN_69 -to LB_XIOH[7]
+set_location_assignment PIN_87 -to LB_IOH[0]
+set_location_assignment PIN_89 -to LB_IOH[1]
+set_location_assignment PIN_91 -to LB_IOH[2]
+set_location_assignment PIN_92 -to LB_IOH[3]
+set_location_assignment PIN_96 -to LB_IOH[4]
+set_location_assignment PIN_97 -to LB_IOH[5]
+set_location_assignment PIN_98 -to LB_IOH[6]
+set_location_assignment PIN_99 -to LB_IOH[7]
+set_location_assignment PIN_75 -to LB_XIOLA[0]
+set_location_assignment PIN_76 -to LB_XIOLA[1]
+set_location_assignment PIN_77 -to LB_XIOLA[2]
+set_location_assignment PIN_78 -to LB_XIOLA[3]
+set_location_assignment PIN_81 -to LB_XIOLA[4]
+set_location_assignment PIN_82 -to LB_XIOLA[5]
+set_location_assignment PIN_83 -to LB_XIOLA[6]
+set_location_assignment PIN_84 -to LB_XIOLA[7]
+set_location_assignment PIN_70 -to LB_XIOLC[0]
+set_location_assignment PIN_71 -to LB_XIOLC[1]
+set_location_assignment PIN_72 -to LB_XIOLC[2]
+
 set_global_assignment -name USE_CONFIGURATION_DEVICE ON
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS "AS INPUT TRI-STATED"
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS_NO_OUTPUT_GND "AS INPUT TRI-STATED"
+set_global_assignment -name SYSTEMVERILOG_FILE max7219.sv
+set_global_assignment -name SYSTEMVERILOG_FILE busy.sv

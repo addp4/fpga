@@ -2,11 +2,18 @@
 // 1RB 4LA 1LA 1RH 2RB 2LB 3LA 1LB 2RA 0RB   7,021,292,621   37
 // >>> hex(7021292621) = '0x1a2806c4d'
 
+// chip pin synthesis attribute. the way things are going we may need it.
+// https://www.intel.com/content/www/us/en/programmable/quartushelp/17.0/hdl/vlog/vlog_file_dir_chip.htm
+// schematic https://earthpeopletechnology.com/wp-content/uploads/2019/02/MEGAPROLOGIC_SCHEMATICS_V3.pdf
+
 module busy(input CLK_66MHZ,
             input        SW_USER_1,
             input        SW_USER_2,
-            output [7:0] LB_IO9,
-            output [7:0] LB_COMM,
+            output [7:0] LB_AD, // J8
+            output [7:0] LB_XIOH, // J16 pins 27-34
+            output [7:0] LB_IOH,  // J9
+            output [7:0] LB_XIOLA, // J16 pins 3-10
+            output [7:0] LB_COMM,  // J10
             output       LED_1_BLUE,
             output       LED_1_GREEN,
             output       LED_1_RED, 
@@ -26,15 +33,17 @@ module busy(input CLK_66MHZ,
    enum                  bit [1:0] { A, B, C, H } state_t;
    reg [1:0]             state = C, next = C;
    enum                  bit { L, R } dir_t;
-   reg                   dir;
+   reg                   dir = R;
    wire                  halt;
    wire                  reset = !SW_USER_1 || !SW_USER_2;
+   reg [31:0]            count;
    
    // Single-ported RAM
    reg [2:0]     tape[64];
    wire [2:0]    sym;
    reg [2:0]     newsym;
-   reg [6:0]     pos = 0;       // see check for -1 in state C
+   reg [6:0]     pos = 0;
+   localparam MAXPOS = 7'b1111111;
    assign sym = tape[pos];
    always @(posedge CLK_66MHZ) begin
       tape[pos] = newsym;
@@ -53,13 +62,13 @@ module busy(input CLK_66MHZ,
    assign LED_4_GREEN = 1;      // led 4 = red if state C
    assign LED_4_RED = !(state == C);
    assign LED_4_BLUE = 1;
-   
+
    assign halt = state == H;
    assign LB_COMM[0] = halt;
-   assign LB_IO9[0] = halt;
-   assign LB_IO9[7:1] = pos;
+   assign LB_IOL = count[19:12];
 
-   // this board sucks ass. have to set level shifter OE and DIR or NO OUTPUTEE
+   // GPIO output control. frankly this sucks.
+   // have to set level shifter OE and DIR or NO OUTPUTEE
    // set DIR to 0 for cpld output (B->A), to 1 for cpld input (A->B)
    // set OE in negative logic
    assign TR_OE_1 = 0;
@@ -73,10 +82,16 @@ module busy(input CLK_66MHZ,
    assign TR_DIR_4 = 0;
    assign TR_DIR_5 = 0;
 
+   // 8-digit seven-segment driver
+   max7219 disp(.clk(CLK_66MHZ), .rst_n(!reset), 
+                .max_din(LB_AD[0]), .ce_(LB_AD[1]), .max_clk(LB_AD[2]),
+                .display_value(count));
+   
    always @(posedge CLK_66MHZ) begin
       state <= reset ? C : next;
       pos <= (reset || state == H) ? 0 :
              (dir == L) ? pos - 1'b1 : pos + 1'b1;
+      count <= (halt | reset) ? 0 : count + 1;
    end
 
    // A0  A1  A2  A3  A4  B0  B1  B2  B3  B4    s(M)            σ(M)
@@ -150,9 +165,9 @@ module busy(input CLK_66MHZ,
            endcase // case (sym)
         end // case: B
         C: begin  // clear tape, then state A
-           newsym <= 3'h0;
+           newsym <= 0;
            dir <= R;
-           next <= (pos == 7'b1111111) ? A : C;
+           next <= (pos == MAXPOS) ? A : C;
         end
         H: begin  // halt
            next <= reset ? C : H;

@@ -133,10 +133,11 @@ module busybeaver_143space(input clk,
    reg                          halt_d = 0, halt_q = 0;
 
    // Single-ported RAM
-   reg [2:0]                    tape[512];  // size is power of 2 so pos can wrap
+   localparam MEMBITS = 9;
+   reg [2:0]                    tape[1 << MEMBITS];  // size is power of 2 so pos can wrap
    wire [2:0]                   sym;
    reg [2:0]                    newsym;
-   reg [6:0]                    pos = 0;
+   reg [MEMBITS-1:0]                    pos = 0;
    assign sym = tape[pos];
    always @(posedge clk) begin
       tape[pos] = newsym;
