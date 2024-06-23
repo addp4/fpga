@@ -207,13 +207,13 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    wire       cpurst_n;
 
    // ALTPLL for bb
-   wire       clock_100, clock_150, clock_200;
-   pll1 bbclk(.inclk0(CLOCK_50), .c0(clock_100), .c1(clock_150), .c2(clock_200));
+   wire       CLOCK_100, CLOCK_150, CLOCK_200;
+   pll1 bbclk(.inclk0(CLOCK_50), .c0(CLOCK_100), .c1(CLOCK_150), .c2(CLOCK_200));
 
    // Busybeaver module
    wire [63:0] bb_count;
    wire        bb_halt;
-   busybeaver_143space bb(.clk(clock_200), .rst_n(KEY[0]), .count(bb_count), .halt(bb_halt));
+   busybeaver_143space bb(.clk(CLOCK_200), .rst_n(KEY[0]), .count(bb_count), .halt(bb_halt));
 
    // 68008 cpu module
    mc68008 cpu(
@@ -238,7 +238,7 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
                );
    
    // PSRAM module
-   aps6406 psram(.sysclk(CLOCK_50), .rst_n(KEY[0]), .spiclk(GPIO_0[1]),
+   aps6406 psram(.sysclk(CLOCK_100), .rst_n(KEY[0]), .spiclk(GPIO_0[1]),
                  .mosi(GPIO_0[3]), .miso(GPIO_0[5]), .ce_q_(GPIO_0[2]),
                  .led_q(LED), .ramstatus(ramstatus));
    
@@ -280,4 +280,3 @@ module main(input CLOCK_50, input [1:0]KEY, inout [33:0]GPIO_0, inout [0:33]GPIO
    always @(posedge cycles[20]) display_value2 <= ramstatus[31:0];
    
 endmodule // main
-

@@ -278,7 +278,7 @@ endmodule // aps6406
 
 
 module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso, output ce_q_,
-                output [7:0] led_q, output[63:0] ramstatus);
+               output [7:0] led_q, output rambusy, output[63:0] ramstatus);
 //output mosiq[3:0], input misoq[3:0], output we);
 
    wire [7:0]              recv_byte;
@@ -287,7 +287,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
    wire                    new_data;
    reg                     spi_start;
    reg                     ce_, set_chip_select, clear_chip_select;
-   enum                    { INIT,
+   enum                    { IDLE,
                              RDID,
                              RDID_FPORCH,
                              RDID_CMD,
@@ -301,13 +301,14 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
                              RDID_DONE,
                              RDID_BPORCH
                              } state_t;
-   reg [5:0]               state = INIT, next = INIT;
+   reg [5:0]               state = IDLE, next = IDLE;
    reg [7:0]               downcnt, loadcnt;
    reg                     reset_downcnt, reset_loadcnt, decr_downcnt, decr_loadcnt, data_rdy;
    reg [7:0]               delay_cnt, init_delay;
    reg [7:0]               eid[8];
 
    assign ce_q_ = ce_;
+   assign rambusy = state != IDLE;
    assign ramstatus = {eid[7], eid[6], eid[5], eid[4], eid[3], eid[2], eid[1], eid[0]};
 
    localparam                        // device commands
@@ -332,7 +333,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
    assign led_q = state;
 
    always @(posedge sysclk or negedge rst_n) begin
-      if (!rst_n) state <= INIT;
+      if (!rst_n) state <= IDLE;
       else state <= next;
    end
 
@@ -361,7 +362,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
       next <= state;
 
       case (state)
-        INIT: begin
+        IDLE: begin
            clear_chip_select <= 1;
            spi_start <= 0;
            if (rst_n) next <= RDID;
@@ -386,7 +387,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
         end
         // Send 3 bytes of don't care address.
         RDID_ADDR: begin
-           send_byte <= 8'h35;   // silence the MOSI line
+           send_byte <= 8'h35;   // don't care, for logic analyzer debugging
            spi_start <= 1;
            if (busy) next <= RDID_ADDR_WAIT;
         end
@@ -404,7 +405,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
         end
         // Load 8 bytes of EID.
         RDID_LOAD: begin
-           send_byte <= 8'h71;   // silence the MOSI line
+           send_byte <= 8'h71;   // don't care, for logic analyzer debugging
            spi_start <= 1;
            next <= RDID_LOAD_WAIT;
         end
@@ -424,7 +425,7 @@ module aps6406(input sysclk, input rst_n, output spiclk, output mosi, input miso
            next <= RDID_BPORCH;
         end
         RDID_BPORCH: begin
-           if (delay_cnt == 0) next <= INIT; // start over
+           if (delay_cnt == 0) next <= IDLE; // start over
         end
 
       endcase // case (state)
