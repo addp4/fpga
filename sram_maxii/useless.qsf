@@ -125,3 +125,4 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to ram_io[6]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to ram_io[7]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to ram_oe_
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to ram_we_
+set_global_assignment -name RESERVE_ALL_UNUSED_PINS_NO_OUTPUT_GND "AS INPUT TRI-STATED"
