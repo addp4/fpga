@@ -169,7 +169,7 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
                   };
    reg [4:0]    pinit;
 
-   spi #(100) max7219(.clk(clk),
+   spi #(20) max7219(.clk(clk),
                     .rst(rst),
                     .miso(miso_ignored),
                     .mosi(max_din),

@@ -21,7 +21,7 @@ module useless
    // DRAM device
    reg 		write = 0, ena = 0;
    reg [3:0] 	wr_data = 0;
-   reg [3:0] 	rd_data = 0;
+   reg [7:0] 	rd_data = 0;
    reg 		busy;
    reg 		ack = 0;
    reg 		error = 0;
@@ -45,7 +45,7 @@ module useless
    reg [2:0] 	state = 0;
    reg [24:0] 	count = 0;
    // assign led[3:0] = rd_data;
-   assign max_display[19:16] = rd_data;
+   assign max_display[23:16] = rd_data;
    assign max_display[15:0] = addr[15:0];
    assign led_error = error;
 
@@ -88,13 +88,14 @@ module useless
 	   if (!busy) state <= 6;
 	end
 	6: begin
-	   if (addr[3:0] != 4'(rd_data-OFF)) error <= 1;
+	   if (addr[3:0] + OFF != rd_data[3:0]) error <= 1;
+	   if (addr[3:0] + OFF + 4'd1 != rd_data[7:4]) error <= 1;
 	   count <= 1;
 	   state <= 7;
 	end
 	7: begin
 	   count <= count + 24'd1;
-	   if (count[21:0] == 22'd0) begin
+	   if (count[23:0] == 24'd0) begin
 	      addr <= addr + 16'd1;
 	      state <= 4;
 	   end
@@ -125,7 +126,7 @@ module tms4464
   (
    input 	    clk,
    input [15:0]     addr,
-   output [3:0]     rd_data,
+   output [7:0]     rd_data,
    output 	    busy,
    output 	    ack,
    input 	    write,
@@ -141,13 +142,14 @@ module tms4464
    typedef enum      { INIT, IDLE, U0, U1 } state_t;
    reg [4:0] 	     state = INIT;
    reg [3:0] 	     twait = 0;
-   reg [3:0] 	     data_latch = 0;
+   reg [7:0] 	     dlatch = 0;
    reg [13:0] 	     cyc = 0;
+   reg [7:0] 	     ldata;
    parameter refresh_cycles = 781;
    // parameter refresh_cycles = 40;
    reg 		     init = 1;
 
-   typedef enum       { NOP, LATCH_DATA, COLA, ROWA } op_t;
+   typedef enum       { NOP, DLATCH, COLA0, COLA1, ROWA } op_t;
    typedef struct {
       bit 	  we_;
       bit 	  oe_;
@@ -161,7 +163,7 @@ module tms4464
    u_control  	  uinst;
 
    assign busy = (state != IDLE);
-   assign rd_data = data_latch;
+   assign rd_data = dlatch;
 
    always @(*) begin
       case (upc)
@@ -173,32 +175,39 @@ module tms4464
 	0: uinst <= '{oe_:1, we_:1, ras_:1, cas_:0, op:NOP, stall:5, h:0};
 	1: uinst <= '{oe_:1, we_:1, ras_:0, cas_:0, op:NOP, stall:5, h:1};
 	//
-	// Read cycle.
-	// 2. present row addr, ras low, we high. wait tRLCL=[25,50]ns=2c
-	// 3. present col addr, cas low, oe low, wait tw(CL)=50ns=3c
-	//       tw(RL)=100ns is satisfied
-	// 4. latch data, cas high, oe high. wait tRHrd=10ns=1c
-	// 5. ras high. wait tw(RH)=90ns=5c (precharge)
+	// 8-bit Read cycle.
+	// present row addr, wait tRLCL=[25,50]ns=2c
+	// ras low
+	// present col addr
+	// cas low, oe low, wait tw(CL)=50ns=3c (tw(RL)=100ns is satisfied)
+	// latch data, cas high, oe high. wait tRHrd=10ns=1c
+	// present col addr+1
+	// cas low, oe low, wait tw(CL)=50ns=3c (tw(RL)=100ns is satisfied)
+	// latch data, cas high, oe high. wait tRHrd=10ns=1c
+	// ras high. wait tw(RH)=90ns=5c (precharge)
 	//
 	2: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
 	3: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:NOP, stall:1, h:0};
-	4: uinst <= '{oe_:0, we_:1, ras_:0, cas_:1, op:COLA, stall:1, h:0};
+	4: uinst <= '{oe_:0, we_:1, ras_:0, cas_:1, op:COLA0, stall:1, h:0};
 	5: uinst <= '{oe_:0, we_:1, ras_:0, cas_:0, op:NOP, stall:2, h:0};
-	6: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:LATCH_DATA, stall:1, h:0};
-	7: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:4, h:1};
+	6: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:DLATCH, stall:1, h:0};
+	7: uinst <= '{oe_:0, we_:1, ras_:0, cas_:1, op:COLA1, stall:1, h:0};
+	8: uinst <= '{oe_:0, we_:1, ras_:0, cas_:0, op:NOP, stall:2, h:0};
+	9: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:DLATCH, stall:1, h:0};
+	10: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:4, h:1};
 	//
-	// Write cycle (early).
-	// 6. present row addr, ras low, we low. wait tRLCL=[25,50]ns=2c
-	// 7. present col addr, cas low, present data (tri-state assign),
+	// 8-bit Write cycle (early).
+	// present row addr, ras low, we low. wait tRLCL=[25,50]ns=2c
+	// present col addr, cas low, present data (tri-state assign),
 	//      wait max(th(CLW), th(CLD)) = max(30,30) = 2c
 	//      but also meet tRLCH and tw(RL) = 100ns, so 3c to make 5c total
-	// 8. cas high, ras high, we high. wait tw(RH) = 90ns = 5c
+	// cas high, ras high, we high. wait tw(RH) = 90ns = 5c
 	//
-	8: uinst <= '{oe_:1, we_:0, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
-	9: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:NOP, stall:2, h:0};
-	10: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:COLA, stall:2, h:0};
-	11: uinst <= '{oe_:1, we_:0, ras_:0, cas_:0, op:NOP, stall:3, h:0};
-	12: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:5, h:1};
+	11: uinst <= '{oe_:1, we_:0, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
+	12: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:NOP, stall:2, h:0};
+	13: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:COLA0, stall:2, h:0};
+	14: uinst <= '{oe_:1, we_:0, ras_:0, cas_:0, op:NOP, stall:3, h:0};
+	15: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:5, h:1};
 
 	default:
 	  uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
@@ -238,7 +247,7 @@ module tms4464
 	   end else if (ena) begin
 	      ack <= 1;
 	      if (write) begin
-		 upc <= 8;
+		 upc <= 11;
 		 state <= U0;
 	      end else begin
 		 upc <= 2;
@@ -252,10 +261,11 @@ module tms4464
 	   ram_ras_ <= uinst.ras_;
 	   ram_cas_ <= uinst.cas_;
 	   case (uinst.op)
-	     LATCH_DATA: data_latch <= ram_dq;
+	     DLATCH: dlatch <= { ram_dq, dlatch[7:4] };
 	     ROWA: ram_addr <= addr[15:8];
 	     // ROWA: ram_addr <= 1;
-	     COLA: ram_addr <= addr[7:0];
+	     COLA0: ram_addr <= addr[7:0];
+	     COLA1: ram_addr <= addr[7:0] + 8'd1;
 	     default: ;
 	   endcase // case (uinst.op)
 
