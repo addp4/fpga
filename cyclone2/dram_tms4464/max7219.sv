@@ -144,33 +144,32 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
    wire       miso_ignored, new_data_ignored;
    reg        spi_start;
    wire       rst;
-   enum { INIT, INIT1, INIT1_WAIT, INIT2, INIT2_WAIT, INIT_HOLD, INIT_DONE, DISP1, DISP2 } state_t;
-   reg [3:0]    state;
+   enum { POR, INIT, INIT1, INIT1_WAIT, INIT2, INIT2_WAIT, INIT_HOLD, INIT_DONE } state_t;
+   reg [3:0]    state = POR;
    reg [4:0]    addr;
-   reg [31:0]   disp_dig;
+   reg [31:0]   disp_dig = 0;
    reg [7:0]    LED_out;
    reg          max_load;
    assign ce_ = max_load;
    
    localparam DECODEMODE_ADDR = 9;
-   localparam BRIGHTNESS_ADDR = 10;
-   localparam SCANLIMIT_ADDR = 11;
-   localparam SHUTDOWN_ADDR = 12;
-   localparam DISPLAYTEST_ADDR = 13;
-   
+   localparam BRIGHTNESS_ADDR = 10; // 0xa
+   localparam SCANLIMIT_ADDR = 11; // 0xb
+   localparam SHUTDOWN_ADDR = 12; // 0xc
+   localparam DISPLAYTEST_ADDR = 13; // 0xd
    localparam INITBYTES = 14;
    reg [7:0]  maxinit[0:INITBYTES-1] = 
-                '{0, 0,         // nop; this may help recover a random state
-                  DISPLAYTEST_ADDR, 0,
-                  SCANLIMIT_ADDR, 7,
-                  DECODEMODE_ADDR, 0,
-                  SHUTDOWN_ADDR, 1,
-                  BRIGHTNESS_ADDR, 7,
+                '{SHUTDOWN_ADDR, 0, // display off
+                  DISPLAYTEST_ADDR, 0, // display test off
+                  SCANLIMIT_ADDR, 7,  // display 8 digits
+                  DECODEMODE_ADDR, 0, // no decode (needed for hex digits)
+                  BRIGHTNESS_ADDR, 7,  // intensity 50%
+                  SHUTDOWN_ADDR, 1, // display on
                   1, 8'h0      // byte 12-13
                   };
    reg [4:0]    pinit;
 
-   spi #(10) max7219(.clk(clk),
+   spi #(100) max7219(.clk(clk),
                     .rst(rst),
                     .miso(miso_ignored),
                     .mosi(max_din),
@@ -186,6 +185,10 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
 
    always @(posedge clk) begin
       case (state)
+	POR: begin
+	   disp_dig <= disp_dig + 32'd1;
+	   if (disp_dig[20]) state <= INIT;
+	end
         INIT: begin
            pinit <= 0;
            state <= INIT1;
@@ -218,13 +221,11 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
            max_load <= 1;
            state <= (pinit < 12) ? INIT1 : INIT_DONE;
         end
-        // Use the init loop to iterate through the 8-digit value on
-        // the display since that is already about writing 8 bit
-        // values. One digit (8 bits) is sent per "init". The low 4
-        // bits of disp_num are mapped to a segment code. addr counts
-        // the digits from 1 to 8 and disp_num is shifted right 4 per
-        // digit. When addr reaches 8 a new display value is latched
-        // and addr resets to 1.
+        // Use the init loop with indices 12 and 13 to drive the 8 hex
+        // digits. The low 4 bits of disp_num are mapped to a segment
+        // code. addr counts the digits from 1 to 8 and disp_num is
+        // shifted right 4 per digit. When addr reaches 8 a new
+        // display value is latched and addr resets to 1.
         INIT_DONE: begin
            pinit <= 12;
            maxinit[12] <= addr;

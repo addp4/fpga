@@ -45,8 +45,8 @@ module useless
    reg [2:0] 	state = 0;
    reg [24:0] 	count = 0;
    // assign led[3:0] = rd_data;
-   assign max_display[7:4] = addr[7:4];
-   assign max_display[3:0] = rd_data;
+   assign max_display[19:16] = rd_data;
+   assign max_display[15:0] = addr[15:0];
    assign led_error = error;
 
    always @(posedge clk) begin
@@ -90,12 +90,11 @@ module useless
 	6: begin
 	   if (addr[3:0] != 4'(rd_data-OFF)) error <= 1;
 	   count <= 1;
-	   addr <= addr + 16'd1;
-	   state <= 4;
+	   state <= 7;
 	end
 	7: begin
 	   count <= count + 24'd1;
-	   if (count[3:0] == 20'd0) begin
+	   if (count[21:0] == 22'd0) begin
 	      addr <= addr + 16'd1;
 	      state <= 4;
 	   end
