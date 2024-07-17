@@ -171,17 +171,17 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
                   };
    reg [4:0] 	hold_cnt;
 
-   spi #(1024) max7219(.clk(clk),
-                    .rst(rst),
-                    .miso(miso_ignored),
-                    .mosi(max_din),
-                    .sck(max_clk),
-                    .new_data(new_data_ignored),
-                    .start(spi_start),
-                    .data_in(data),
-                    .data_out(data_out),
-                    .busy(busy)
-                    );
+   spi #(10) max7219(.clk(clk),
+                       .rst(rst),
+                       .miso(miso_ignored),
+                       .mosi(max_din),
+                       .sck(max_clk),
+                       .new_data(new_data_ignored),
+                       .start(spi_start),
+                       .data_in(data),
+                       .data_out(data_out),
+                       .busy(busy)
+                       );
    
    assign rst = ~rst_n;
 
