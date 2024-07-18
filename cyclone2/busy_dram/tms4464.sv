@@ -24,7 +24,7 @@ module tms4464
    // parameter refresh_cycles = 40;
    reg 		     init = 1;
 
-   typedef enum       { NOP, DLATCH, COLA0, ROWA } op_t;
+   typedef enum       { NOP, DLATCH, COLA, ROWA } op_t;
    typedef struct {
       bit 	  we_;
       bit 	  oe_;
@@ -60,10 +60,10 @@ module tms4464
 	//
 	2: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
 	3: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:NOP, stall:1, h:0};
-	4: uinst <= '{oe_:0, we_:1, ras_:0, cas_:1, op:COLA0, stall:1, h:0};
+	4: uinst <= '{oe_:0, we_:1, ras_:0, cas_:1, op:COLA, stall:0, h:0};
 	5: uinst <= '{oe_:0, we_:1, ras_:0, cas_:0, op:NOP, stall:2, h:0};
-	6: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:DLATCH, stall:1, h:0};
-	7: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:4, h:1};
+	6: uinst <= '{oe_:1, we_:1, ras_:0, cas_:1, op:DLATCH, stall:0, h:0};
+	7: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
 	//
 	// 8-bit Write cycle (early).
 	// present row addr, ras low, we low. wait tRLCL=[25,50]ns=2c
@@ -73,10 +73,10 @@ module tms4464
 	// cas high, ras high, we high. wait tw(RH) = 90ns = 5c
 	//
 	11: uinst <= '{oe_:1, we_:0, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
-	12: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:NOP, stall:2, h:0};
-	13: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:COLA0, stall:2, h:0};
-	14: uinst <= '{oe_:1, we_:0, ras_:0, cas_:0, op:NOP, stall:3, h:0};
-	15: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:5, h:1};
+	12: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:NOP, stall:1, h:0};
+	13: uinst <= '{oe_:1, we_:0, ras_:0, cas_:1, op:COLA, stall:0, h:0};
+	14: uinst <= '{oe_:1, we_:0, ras_:0, cas_:0, op:NOP, stall:0, h:0};
+	15: uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
 
 	default:
 	  uinst <= '{oe_:1, we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
@@ -132,7 +132,7 @@ module tms4464
 	   case (uinst.op)
 	     DLATCH: dlatch <= ram_dq;
 	     ROWA: ram_addr <= addr[15:8];
-	     COLA0: ram_addr <= addr[7:0];
+	     COLA: ram_addr <= addr[7:0];
 	     default: ;
 	   endcase // case (uinst.op)
 
