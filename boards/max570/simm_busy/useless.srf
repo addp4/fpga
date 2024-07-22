@@ -1,0 +1,6 @@
+{ "" "" "" "Number of processors has not been specified which may cause overloading on shared machines.  Set the global assignment NUM_PARALLEL_PROCESSORS in your QSF to an appropriate value for best performance." {  } {  } 0 18236 "" 0 0 "Quartus II" 0 -1 0 ""}
+{ "" "" "" "Feature LogicLock is only available with a valid subscription license. You can purchase a software subscription to gain full access to this feature." {  } {  } 0 292013 "" 0 0 "Quartus II" 0 -1 0 ""}
+{ "" "" "" "Node: glow_led:glo\|count\[20\] was determined to be a clock but was found without an associated clock assignment." {  } {  } 0 332060 "" 0 0 "Quartus II" 0 -1 0 ""}
+{ "" "" "" "Found invalid Fitter assignments. See the Ignored Assignments panel in the Fitter Compilation Report for more information." {  } {  } 0 171167 "" 0 0 "Quartus II" 0 -1 0 ""}
+{ "" "" "" "Ignored locations or region assignments to the following nodes" {  } {  } 0 15705 "" 0 0 "Quartus II" 0 -1 0 ""}
+{ "" "" "" "*" {  } {  } 0 20028 "" 0 0 "Quartus II" 0 -1 0 ""}
