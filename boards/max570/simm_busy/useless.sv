@@ -23,11 +23,11 @@ module useless
    reg 		m_busy;
    reg 		m_ack = 0;
    reg [23:0] 	m_addr = 0;
-   tms4464 ram(.clk(clk), .addr(m_addr), .rd_data(rd_data),
-	       .busy(m_busy), .ack(m_ack), .write(m_write), .ena(m_ena),
-	       .ram_addr(ram_addr), .ram_dq(ram_dq),
-	       .ram_we_(ram_we_), .ram_ras_(ram_ras_), .ram_cas_(ram_cas_)
-	       );
+   simm_16mb ram(.clk(clk), .addr(m_addr), .rd_data(rd_data),
+		 .busy(m_busy), .ack(m_ack), .write(m_write), .ena(m_ena),
+		 .ram_addr(ram_addr), .ram_dq(ram_dq),
+		 .ram_we_(ram_we_), .ram_ras_(ram_ras_), .ram_cas_(ram_cas_)
+		 );
    assign ram_dq = (!ram_we_ ? wr_data : 4'hz);
    assign dq_dir = !ram_we_;
 
@@ -38,16 +38,16 @@ module useless
 
    // Busybeaver module
    reg [31:0] 	bb_count;
-   busybeaver_11KB bb(.clk(clk), .rst_n(rst_n), .count(bb_count),
-		     .m_write(m_write), .m_ena(m_ena), .m_busy(m_busy), .m_ack(m_ack),
-		     .wr_data(wr_data), .rd_data(rd_data), .m_addr(m_addr)
-		     );
+   busybeaver bb(.clk(clk), .rst_n(rst_n), .count(bb_count),
+		 .m_write(m_write), .m_ena(m_ena), .m_busy(m_busy), .m_ack(m_ack),
+		 .wr_data(wr_data), .rd_data(rd_data), .m_addr(m_addr)
+		 );
    assign max_display = bb_count;
 
 endmodule // useless
 
 
-module busybeaver_11KB
+module busybeaver
   (
    input 	 clk,
    input 	 rst_n,
@@ -254,5 +254,5 @@ module busybeaver_11KB
 `else
 error   
 `endif
-endmodule // busybeaver_11KB
+endmodule // busybeaver
 

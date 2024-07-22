@@ -1,4 +1,4 @@
-module tms4464
+module simm_16mb  // mt4lc16m4t8
   (
    input 	    clk,
    input [23:0]     addr,
@@ -129,10 +129,10 @@ module tms4464
 	   ram_cas_ <= uinst.cas_;
 	   case (uinst.op)
 	     DLATCH: dlatch <= ram_dq;
-	     // ROWA: ram_addr <= addr[11:0];  // not swapped
-	     // COLA: ram_addr <= addr[23:12];
-	     ROWA: ram_addr <= addr[23:12];  // swap
-	     COLA: ram_addr <= addr[11:0];
+	     ROWA: ram_addr <= addr[11:0];  // not swapped
+	     COLA: ram_addr <= addr[23:12];
+	     // ROWA: ram_addr <= addr[23:12];  // swap
+	     // COLA: ram_addr <= addr[11:0];
 	     default: ;
 	   endcase // case (uinst.op)
 
@@ -158,4 +158,4 @@ module tms4464
       endcase
    end
 
-endmodule
+endmodule // simm_16mb
