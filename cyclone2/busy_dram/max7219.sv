@@ -153,35 +153,38 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
    reg          max_load;
    assign ce_ = max_load;
    
+   localparam NOP_ADDR = 0;
    localparam DECODEMODE_ADDR = 9;
    localparam BRIGHTNESS_ADDR = 10; // 0xa
    localparam SCANLIMIT_ADDR = 11; // 0xb
    localparam SHUTDOWN_ADDR = 12; // 0xc
    localparam DISPLAYTEST_ADDR = 13; // 0xd
-   localparam INITBYTES = 14;
+   localparam INITBYTES = 5'd16;
    reg [4:0] 	pinit;
    reg [7:0] 	maxinit[0:INITBYTES-1] = 
-                '{SHUTDOWN_ADDR, 0, // display off
+                '{// SHUTDOWN_ADDR, 0, // display off
+		  0, 0,
                   DISPLAYTEST_ADDR, 0, // display test off
                   SCANLIMIT_ADDR, 7,  // display 8 digits
-                  DECODEMODE_ADDR, 0, // no decode (needed for hex digits)
-                  BRIGHTNESS_ADDR, 7,  // intensity 50%
+                  DECODEMODE_ADDR, 0, // no decode (hex digits are manual)
+                  BRIGHTNESS_ADDR, 1,  // intensity low
                   SHUTDOWN_ADDR, 1, // display on
-                  1, 8'h0      // byte 12-13
+                  SHUTDOWN_ADDR, 1, // display on
+                  1, 8'h0      // byte 14-15
                   };
-   reg [4:0] 	hold_cnt;
+   reg [7:0] 	hold_cnt;
 
-   spi #(10) max7219(.clk(clk),
-                       .rst(rst),
-                       .miso(miso_ignored),
-                       .mosi(max_din),
-                       .sck(max_clk),
-                       .new_data(new_data_ignored),
-                       .start(spi_start),
-                       .data_in(data),
-                       .data_out(data_out),
-                       .busy(busy)
-                       );
+   spi #(1024) max7219(.clk(clk),
+                    .rst(rst),
+                    .miso(miso_ignored),
+                    .mosi(max_din),
+                    .sck(max_clk),
+                    .new_data(new_data_ignored),
+                    .start(spi_start),
+                    .data_in(data),
+                    .data_out(data_out),
+                    .busy(busy)
+                    );
    
    assign rst = ~rst_n;
 
@@ -194,10 +197,10 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
 	end
         INIT: begin
            pinit <= 0;
-           state <= INIT1;
            max_load <= 0;
            addr <= 1;           // for displaying digits (optional)
            disp_dig <= 0;
+           state <= INIT1;
         end
         INIT1: begin
            max_load <= 0;
@@ -222,7 +225,12 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
         end
         INIT_HOLD: begin
            max_load <= 1;
-	   state <= (pinit < 12) ? INIT1 : INIT_DONE;
+	   hold_cnt <= 1;
+	   state <= (pinit < INITBYTES-5'd2) ? INIT1 : INIT_HOLD2;
+	end
+        INIT_HOLD2: begin
+	   hold_cnt <= hold_cnt + 8'd1;
+	   if (hold_cnt == 0) state <= INIT_DONE;
 	end
         // Use the init loop with indices 12 and 13 to drive the 8 hex
         // digits. The low 4 bits of disp_num are mapped to a segment
@@ -230,18 +238,19 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
         // shifted right 4 per digit. When addr reaches 8 a new
         // display value is latched and addr resets to 1.
         INIT_DONE: begin
-           pinit <= 12;
-           maxinit[12] <= addr;
-           maxinit[13] <= LED_out;
+           pinit <= INITBYTES-5'd2;
+           maxinit[INITBYTES-5'd2] <= addr;
+           maxinit[INITBYTES-5'd1] <= LED_out;
 
+           state <= INIT1;
            if (addr < 8) begin
               addr <= addr + 4'b1;
               disp_dig <= disp_dig >> 4;
            end else begin
               addr <= 1;
               disp_dig <= display_value;
+	      if (rst_cnt == 0) state <= INIT;
            end
-           state <= (rst || rst_cnt == 0) ? INIT : INIT1;
         end // case: INIT_DONE
         
       endcase // case (state)
