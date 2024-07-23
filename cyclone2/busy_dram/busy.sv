@@ -30,9 +30,10 @@ module busybeaver
    reg [3:0] 	 newsym = 0;
    // DRAM state machine
    typedef enum { M_INIT1, M_INIT2, M_INIT3, M_INIT4,
-		  M_R1, M_R2, M_W1, M_W2, M_TM1, M_TM2 } m_t;
+		  M_R1, M_R2, M_W1, M_W2, M_TM1, M_TM2, M_SLEEP } m_t;
    reg [3:0] 	m_state = M_INIT1;
    reg 		countdn = 1;
+   reg [25:0] 	sleep;
 
    // reg [2:0] 	tape[128];  // size is power of 2 so pos can wrap
    // assign sym = tape[pos];
@@ -68,26 +69,27 @@ module busybeaver
 	M_R1: begin
 	   m_write <= 0;
 	   m_ena <= 1;
-	   if (m_ack) m_state <= M_R2;
-	end
-	M_R2: begin
-	   m_ena <= 0;
-	   if (!m_busy) begin
+	   if (m_ack) begin
+	      m_ena <= 0;
+	      // Bypass waiting for 1-cycle memory
 	      sym <= rd_data;
-	      m_state <= M_TM1;
+	      m_state <= m_busy ? M_R2 : M_W1;
 	   end
 	end
-	M_TM1: begin
-	   latch_dir <= dir;
-	   wr_data <= newsym;
-	   state <= (!rst_n) ? A : next;
-	   count <= countdn ? count - 1 : count + 1;
-	   m_state <= M_W1;
+	M_R2: begin
+	   sym <= rd_data;
+	   if (!m_busy) m_state <= M_W1;
 	end
 	M_W1: begin
+	   latch_dir <= dir;
+	   wr_data <= newsym;
 	   m_write <= 1;
 	   m_ena <= 1;
-	   if (m_ack) m_state <= M_W2;
+	   if (m_ack) begin
+	      m_ena <= 0;
+	      // Bypass waiting for 1-cycle memory
+	      m_state <= m_busy ? M_W2 : M_TM2;
+	   end
 	end
 	M_W2: begin
 	   m_ena <= 0;
@@ -95,16 +97,23 @@ module busybeaver
 	end
 	M_TM2: begin
 	   m_addr <= (latch_dir == L) ? m_addr - ADDR_1 : m_addr + ADDR_1;
-	   // m_state <= (state != H) ? M_R1 : M_TM2;  // stop when halt
-	   m_state <= (state != H) ? M_R1 : M_INIT1;  // reset TM when halt
+	   state <= next;
+	   count <= countdn ? count - 1 : count + 1;
+	   // m_state <= (next != H) ? M_R1 : M_TM2;  // stop when halt
+	   m_state <= (next != H) ? M_R1 : M_SLEEP;  // reset TM when halt
 	end
+	M_SLEEP: begin
+	   sleep <= sleep - 24'd1;
+	   if (sleep == 1) m_state <= M_INIT1;
+	end
+
       endcase // case (m_state)
    end // always @ (posedge clk)
 
 `define space4k_time15m
-   
+
 `ifdef space90k_time8b
-   
+
    // A0  A1  A2  A3  A4  B0  B1  B2  B3  B4   s(M)            σ(M)
    // 1RB 3LA 1LB 1RA 3RA 2LB 3LA 3RA 4RB 1RH  8,619,024,596   90,604
    // >>> hex(8619024596) = 2_01bb_e0d4
@@ -206,7 +215,7 @@ module busybeaver
    end // always @ (*)
 
 `elsif space43k_time2b
-   
+
    // A0  A1  A2  B0  B1  B2  C1  C2  C3    s(M)            σ(M)
    // 1RB 2LA 1RA 1LB 1LA 2RC 1RH 1LC 2RB   1,808,669,066   43,925
    // >>> hex(1808669066) = 6bce_198a
@@ -244,7 +253,7 @@ module busybeaver
    end // always @ (*)
 
 `elsif space11k_time148m
-   
+
    // A0  A1  A2  A3  A4  B0  B1  B2  B3  B4    s(M)            σ(M)
    // 1RB 3LA 4LA 1RA 1LA 2LA 1RH 4RA 3RB 1RA   148,304,214     11,120
    // >>> hex(148304214) = 0x8d6f156
@@ -276,11 +285,11 @@ module busybeaver
 	default: begin newsym <= 0; dir <= R; next <= H; end
       endcase // case (state)
    end // always @ (*)
-   
+
 `else
    `error "not specified"
 `endif
-     
+
 endmodule // busybeaver_99KB
 
 

@@ -1,18 +1,18 @@
 /* SPI interface (no quad support)
- 
+
  Write to device: (1) set send_byte (2) set start=1 (3) poll busy
  starting in next sysclk cycle until busy == 0. Consider if setup time
  for device is met between (1) and (2), including that at least 1
  sysclk elapses from setting mosi to raising spiclk.
- 
+
  Read from device: if new_data == 1 then data is in recv_byte. this is
  signaled every 8 spiclk, data is constantly being shifted in every
  clock. whether the data is valid depends on the higher level
  protocol, i.e. a read command is in progress.
-  
+
  Timing is driven by the 50MHz system clock (sysclk). To run SPI faster
  than 1/2 of sysclk requires a local clock.
-  
+
  TODO: fix reset so it always works
 */
 
@@ -28,15 +28,15 @@ module spi #(parameter CLK_DIV = 10000)(
 	output 	     busy,
 	output 	     new_data
   );
-   
+
    localparam STATE_SIZE = 2;
    localparam IDLE = 2'd0,
      SCK_LO = 2'd1,
      SCK_HI = 2'd2,
      DATA_INTR = 2'd3;
-   
+
    reg [STATE_SIZE-1:0] state_d, state_q;
-   
+
    reg [7:0] 		data_d, data_q;
    reg [31:0] 		sck_d, sck_q;
    reg 			spiclk;
@@ -44,14 +44,14 @@ module spi #(parameter CLK_DIV = 10000)(
    reg [2:0] 		ctr_d, ctr_q;  // bit counter, 0-7
    reg 			new_data_d, new_data_q;
    reg [7:0] 		data_out_d, data_out_q;
-   
+
    assign mosi = mosi_q;
    // sck is set for "sample rising edge"
    assign sck = spiclk;
    assign busy = state_d != IDLE;
    assign data_out = data_out_q;
    assign new_data = new_data_q;
-   
+
    always @(*) begin
       sck_d = sck_q;
       data_d = data_q;
@@ -61,7 +61,7 @@ module spi #(parameter CLK_DIV = 10000)(
       data_out_d = data_out_q;
       state_d = state_q;
       spiclk = 0;
-      
+
       case (state_q)
         IDLE: begin
            sck_d = 1;                 // reset clock counter
@@ -83,7 +83,7 @@ module spi #(parameter CLK_DIV = 10000)(
         SCK_HI: begin
            sck_d = sck_q + 1'b1;                           // increment clock counter
            spiclk = 1;
-           if (sck_q >= CLK_DIV) begin                   
+           if (sck_q >= CLK_DIV) begin
               data_d = {data_q[6:0], miso};                 // read in data (shift in)
               ctr_d = ctr_q + 1'b1;                         // increment bit counter
               sck_d = 1;
@@ -106,7 +106,7 @@ module spi #(parameter CLK_DIV = 10000)(
         end
       endcase
    end
-   
+
    always @(posedge clk) begin
       if (rst) begin
          ctr_q <= 3'b0;
@@ -126,16 +126,16 @@ module spi #(parameter CLK_DIV = 10000)(
          new_data_q <= new_data_d;
       end
    end
-   
+
 endmodule
 
 
 /* Continuously display a 32-bit value on 8-digit LED module with max7219+SPI interface
- 
+
  TODO: fix reset so it works for any messed up state SPI is in
 */
 
-module max7219(input clk, input rst_n, output max_din, output ce_, 
+module max7219(input clk, input rst_n, output max_din, output ce_,
 	       output max_clk, input [31:0]display_value);
 
    wire [7:0] data_out;
@@ -152,7 +152,7 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
    reg [7:0]    LED_out;
    reg          max_load;
    assign ce_ = max_load;
-   
+
    localparam NOP_ADDR = 0;
    localparam DECODEMODE_ADDR = 9;
    localparam BRIGHTNESS_ADDR = 10; // 0xa
@@ -160,10 +160,9 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
    localparam SHUTDOWN_ADDR = 12; // 0xc
    localparam DISPLAYTEST_ADDR = 13; // 0xd
    localparam INITBYTES = 5'd16;
-   reg [4:0] 	pinit;
-   reg [7:0] 	maxinit[0:INITBYTES-1] = 
-                '{// SHUTDOWN_ADDR, 0, // display off
-		  0, 0,
+   reg [4:0] 	pinit = 0;
+   reg [7:0] 	maxinit[0:INITBYTES-1] =
+                '{SHUTDOWN_ADDR, 0, // display off
                   DISPLAYTEST_ADDR, 0, // display test off
                   SCANLIMIT_ADDR, 7,  // display 8 digits
                   DECODEMODE_ADDR, 0, // no decode (hex digits are manual)
@@ -185,7 +184,7 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
                     .data_out(data_out),
                     .busy(busy)
                     );
-   
+
    assign rst = ~rst_n;
 
    always @(posedge clk) begin
@@ -196,7 +195,6 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
 	   if (disp_dig[20]) state <= INIT;
 	end
         INIT: begin
-           pinit <= 0;
            max_load <= 0;
            addr <= 1;           // for displaying digits (optional)
            disp_dig <= 0;
@@ -249,33 +247,35 @@ module max7219(input clk, input rst_n, output max_din, output ce_,
            end else begin
               addr <= 1;
               disp_dig <= display_value;
-	      if (rst_cnt == 0) state <= INIT;
+	      if (rst_cnt == 0) begin
+		 pinit <= 2;  // skip shutdown
+		 state <= INIT;
+	      end
            end
         end // case: INIT_DONE
-        
+
       endcase // case (state)
    end // always @ (posedge clk)
 
    always @(*) begin
            case(disp_dig & 4'hf)
-             4'b0000: LED_out = 7'b1111110; // "0"     
-             4'b0001: LED_out = 7'b0110000; // "1" 
-             4'b0010: LED_out = 7'b1101101; // "2" 
-             4'b0011: LED_out = 7'b1111001; // "3" 
-             4'b0100: LED_out = 7'b0110011; // "4" 
-             4'b0101: LED_out = 7'b1011011; // "5" 
-             4'b0110: LED_out = 7'b1011111; // "6" 
-             4'b0111: LED_out = 7'b1110000; // "7" 
-             4'b1000: LED_out = 7'b1111111; // "8"     
-             4'b1001: LED_out = 7'b1111011; // "9" 
-             4'b1010: LED_out = 7'b1110111; // "A" 
-             4'b1011: LED_out = 7'b0011111; // "b" 
-             4'b1100: LED_out = 7'b1001110; // "C" 
-             4'b1101: LED_out = 7'b0111101; // "d" 
-             4'b1110: LED_out = 7'b1001111; // "E" 
+             4'b0000: LED_out = 7'b1111110; // "0"
+             4'b0001: LED_out = 7'b0110000; // "1"
+             4'b0010: LED_out = 7'b1101101; // "2"
+             4'b0011: LED_out = 7'b1111001; // "3"
+             4'b0100: LED_out = 7'b0110011; // "4"
+             4'b0101: LED_out = 7'b1011011; // "5"
+             4'b0110: LED_out = 7'b1011111; // "6"
+             4'b0111: LED_out = 7'b1110000; // "7"
+             4'b1000: LED_out = 7'b1111111; // "8"
+             4'b1001: LED_out = 7'b1111011; // "9"
+             4'b1010: LED_out = 7'b1110111; // "A"
+             4'b1011: LED_out = 7'b0011111; // "b"
+             4'b1100: LED_out = 7'b1001110; // "C"
+             4'b1101: LED_out = 7'b0111101; // "d"
+             4'b1110: LED_out = 7'b1001111; // "E"
              4'b1111: LED_out = 7'b1000111; // "F"
              default: LED_out = 7'b0000000; // can't happen
            endcase // case (disp_dig & 8'hf)
    end
 endmodule // max7219
-
