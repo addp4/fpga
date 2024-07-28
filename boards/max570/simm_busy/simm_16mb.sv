@@ -1,20 +1,19 @@
 module simm_16mb  // mt4lc16m4t8
   (
-   input 	    clk,
-   input [23:0]     addr,
-   output [7:0]     rd_data,
-   output 	    busy,
-   output 	    ack,
-   input 	    write,
-   input 	    ena,
+   input 	     clk,
+   input [23:0]      addr,
+   output [7:0]      rd_data,
+   output reg	     dtack,
+   input 	     write,
+   input 	     ena,
    output reg [11:0] ram_addr,
-   input [7:0] 	    ram_dq,
-   output reg 	    ram_we_,
-   output reg 	    ram_ras_,
-   output reg 	    ram_cas_
+   input [7:0] 	     ram_dq,
+   output reg 	     ram_we_,
+   output reg 	     ram_ras_,
+   output reg 	     ram_cas_
    );
 
-   typedef enum      { INIT, IDLE, U0, U1 } state_t;
+   typedef enum      { INIT, IDLE, U0, U1, U2 } state_t;
    reg [4:0] 	     state = INIT;
    reg [3:0] 	     twait = 0;
    reg [7:0] 	     dlatch = 0;
@@ -22,6 +21,7 @@ module simm_16mb  // mt4lc16m4t8
    parameter refresh_cycles = 781;
    // parameter refresh_cycles = 40;
    reg 		     init = 1;
+   reg 		     do_req = 0;
 
    typedef enum       { NOP, DLATCH, COLA, ROWA } op_t;
    typedef struct {
@@ -35,19 +35,18 @@ module simm_16mb  // mt4lc16m4t8
    reg [4:0] 	  upc = 0;
    u_control  	  uinst;
 
-   assign busy = (state != IDLE);
    assign rd_data = dlatch;
 
    always @(*) begin
       case (upc)
+	0: uinst <= '{we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
 	//
 	// CBR refresh.
 	// 0. cas low, others don't care. wait 90 ns
 	// 1. ras low. wait 100ns
 	//
-	0: uinst <= '{we_:1, ras_:1, cas_:0, op:NOP, stall:4, h:0};
-	1: uinst <= '{we_:1, ras_:0, cas_:0, op:NOP, stall:4, h:0};
-	2: uinst <= '{we_:1, ras_:1, cas_:1, op:NOP, stall:4, h:1};
+	1: uinst <= '{we_:1, ras_:1, cas_:0, op:NOP, stall:1, h:0};
+	2: uinst <= '{we_:1, ras_:0, cas_:0, op:NOP, stall:2, h:1};
 	//
 	// 8-bit Read cycle.
 	// present row addr, wait tRLCL=[25,50]ns=2c
@@ -57,12 +56,11 @@ module simm_16mb  // mt4lc16m4t8
 	// latch data, cas high, oe high. wait tRHrd=10ns=1c
 	// ras high. wait tw(RH)=90ns=5c (precharge)
 	//
-	3: uinst <= '{we_:1, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
-	4: uinst <= '{we_:1, ras_:0, cas_:1, op:NOP, stall:1, h:0};
-	5: uinst <= '{we_:1, ras_:0, cas_:1, op:COLA, stall:0, h:0};
-	6: uinst <= '{we_:1, ras_:0, cas_:0, op:NOP, stall:2, h:0};
-	7: uinst <= '{we_:1, ras_:0, cas_:0, op:DLATCH, stall:0, h:0};
-	8: uinst <= '{we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
+	4: uinst <= '{we_:1, ras_:1, cas_:1, op:ROWA, stall:0, h:0};
+	5: uinst <= '{we_:1, ras_:0, cas_:1, op:NOP, stall:0, h:0};
+	6: uinst <= '{we_:1, ras_:0, cas_:1, op:COLA, stall:0, h:0};
+	7: uinst <= '{we_:1, ras_:0, cas_:0, op:NOP, stall:0, h:0};
+	8: uinst <= '{we_:1, ras_:1, cas_:1, op:DLATCH, stall:0, h:1};
 	//
 	// 8-bit Write cycle (early).
 	// we_ is either don't-care or low.
@@ -72,11 +70,11 @@ module simm_16mb  // mt4lc16m4t8
 	//      but also meet tRLCH and tw(RL) = 100ns, so 3c to make 5c total
 	// cas high, ras high, we high. wait tw(RH) = 90ns = 5c
 	//
-	11: uinst <= '{we_:0, ras_:1, cas_:1, op:ROWA, stall:2, h:0};
-	12: uinst <= '{we_:0, ras_:0, cas_:1, op:NOP, stall:2, h:0};
-	13: uinst <= '{we_:0, ras_:0, cas_:1, op:COLA, stall:2, h:0};
-	14: uinst <= '{we_:0, ras_:0, cas_:0, op:NOP, stall:3, h:0};
-	15: uinst <= '{we_:1, ras_:1, cas_:1, op:NOP, stall:4, h:1};
+	11: uinst <= '{we_:0, ras_:1, cas_:1, op:ROWA, stall:0, h:0};
+	12: uinst <= '{we_:0, ras_:0, cas_:1, op:NOP, stall:0, h:0};
+	13: uinst <= '{we_:0, ras_:0, cas_:1, op:COLA, stall:0, h:0};
+	14: uinst <= '{we_:0, ras_:0, cas_:0, op:NOP, stall:0, h:0};
+	15: uinst <= '{we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
 
 	default:
 	  uinst <= '{we_:1, ras_:1, cas_:1, op:NOP, stall:0, h:1};
@@ -85,12 +83,17 @@ module simm_16mb  // mt4lc16m4t8
 
    always @(posedge clk) begin
       cyc <= cyc + 14'd1;
+      dtack <= dtack & ena;
 
       case (state)
 	INIT: begin
+	   ram_we_ <= 1;
+	   ram_ras_ <= 1;
+	   ram_cas_ <= 1;
+	   dtack <= 0;
 	   // Pause 200us = 10000 cycles
-	   if (cyc == 10000) begin
-	   // if (cyc == 10) begin for simulation
+	   // if (cyc == 10000) begin
+	   if (cyc == 8) begin // for simulation
 	      cyc <= 0;
 	      state <= IDLE;
 	   end
@@ -100,25 +103,26 @@ module simm_16mb  // mt4lc16m4t8
 	   ram_we_ <= 1;
 	   ram_ras_ <= 1;
 	   ram_cas_ <= 1;
-	   ack <= 0;
+	   dtack <= 0;
+	   do_req <= 0;
 	   if (init) begin
 	      // CBR takes 10 cycles. Do at least 8 of them.
 	      if (cyc < 100) begin
-		 upc <= 0;
+		 upc <= 1;
 		 state <= U0;
 	      end
 	      else init <= 0;
 	   end else if (cyc >= refresh_cycles) begin
 	      cyc <= cyc - 14'(refresh_cycles);
-	      upc <= 0;
+	      upc <= 1;
 	      state <= U0;
 	   end else if (ena) begin
-	      ack <= 1;
+	      do_req <= 1;
 	      if (write) begin
 		 upc <= 11;
 		 state <= U0;
 	      end else begin
-		 upc <= 3;
+		 upc <= 4;
 		 state <= U0;
 	      end
 	   end
@@ -129,32 +133,47 @@ module simm_16mb  // mt4lc16m4t8
 	   ram_cas_ <= uinst.cas_;
 	   case (uinst.op)
 	     DLATCH: dlatch <= ram_dq;
-	     ROWA: ram_addr <= addr[11:0];  // not swapped
-	     COLA: ram_addr <= addr[23:12];
-	     // ROWA: ram_addr <= addr[23:12];  // swap
-	     // COLA: ram_addr <= addr[11:0];
+	     // ROWA: ram_addr <= addr[11:0];  // swapp
+	     // COLA: ram_addr <= addr[23:12];
+	     ROWA: ram_addr <= addr[23:12];  // not swapped
+	     COLA: ram_addr <= addr[11:0];
 	     default: ;
 	   endcase // case (uinst.op)
 
-	   if (uinst.stall < 2) begin
-	      if (uinst.h) state <= IDLE;
+	   if (uinst.stall == 0) begin
+	      if (uinst.h) begin
+		 state <= U2;
+	      end
 	      else upc <= upc + 5'd1;
 	   end else begin
-	      twait <= 1;
+	      twait <= uinst.stall;
 	      state <= U1;
 	   end
 	end
 	U1: begin  // state: 3
-	   twait <= twait + 4'd1;
-	   if (twait >= uinst.stall) begin
+	   twait <= twait - 4'd1;
+	   if (twait == 1) begin
 	      if (uinst.h) begin
-		 state <= IDLE;
+		 state <= U2;
 	      end else begin
 		 upc <= upc + 5'd1;
 		 state <= U0;
 	      end
 	   end
 	end // case: U1
+	U2: begin
+	   ram_we_ <= 1;
+	   ram_ras_ <= 1;
+	   ram_cas_ <= 1;
+	   if (do_req) begin
+	      dtack <= 1;
+	      if (!ena) begin
+		 dtack <= 0;
+		 state <= IDLE;
+	      end
+	   end
+	   else state <= IDLE;
+	end
       endcase
    end
 

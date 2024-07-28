@@ -115,6 +115,7 @@ set_global_assignment -name DEVICE_FILTER_PIN_COUNT 100
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to max_ce_
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to max_clk
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to max_din
+set_global_assignment -name SYSTEMVERILOG_FILE tb_simm.sv
 set_global_assignment -name SYSTEMVERILOG_FILE simm_16mb.sv
 set_global_assignment -name SYSTEMVERILOG_FILE max7219.sv
 set_global_assignment -name SDC_FILE useless.sdc

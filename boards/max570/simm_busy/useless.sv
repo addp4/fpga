@@ -20,11 +20,10 @@ module useless
    reg 		m_write = 0, m_ena = 0;
    reg [7:0] 	wr_data = 0;
    reg [7:0] 	rd_data = 0;
-   reg 		m_busy;
-   reg 		m_ack = 0;
+   reg 		m_dtack = 0;
    reg [23:0] 	m_addr = 0;
    simm_16mb ram(.clk(clk), .addr(m_addr), .rd_data(rd_data),
-		 .busy(m_busy), .ack(m_ack), .write(m_write), .ena(m_ena),
+		 .dtack(m_dtack), .write(m_write), .ena(m_ena),
 		 .ram_addr(ram_addr), .ram_dq(ram_dq),
 		 .ram_we_(ram_we_), .ram_ras_(ram_ras_), .ram_cas_(ram_cas_)
 		 );
@@ -39,7 +38,7 @@ module useless
    // Busybeaver module
    reg [31:0] 	bb_count;
    busybeaver bb(.clk(clk), .rst_n(rst_n), .count(bb_count),
-		 .m_write(m_write), .m_ena(m_ena), .m_busy(m_busy), .m_ack(m_ack),
+		 .m_write(m_write), .m_ena(m_ena), .m_dtack(m_dtack),
 		 .wr_data(wr_data), .rd_data(rd_data), .m_addr(m_addr)
 		 );
    assign max_display = bb_count;
@@ -56,8 +55,7 @@ module busybeaver
    output 	 m_ena,
    output [7:0]  wr_data,
    input [7:0] 	 rd_data,
-   input 	 m_busy,
-   input 	 m_ack,
+   input 	 m_dtack,
    output [23:0] m_addr
    );
 
@@ -76,81 +74,81 @@ module busybeaver
    reg [7:0] 	 newsym = 0;
    // DRAM state machine
    typedef enum  { M_INIT1, M_INIT2, M_INIT3, M_INIT4,
-		   M_R1, M_R2, M_W1, M_W2, M_TM1, M_TM2 } m_t;
+		   M_READ, M_READ2, M_WRITE, M_TM1, M_TM2 } m_t;
    reg [3:0] 	m_state = M_INIT1;
    reg 		countdn = 1;
-   
+
    // reg [2:0] 	tape[128];  // size is power of 2 so pos can wrap
    // assign sym = tape[pos];
    // always @(posedge clk) begin
    //   tape[pos] = newsym;
    // end
-   
+
    assign count = count_d;
-   
+
    always @(posedge clk) begin
       case (m_state)
 	M_INIT1: begin
 	   m_addr <= 0;
 	   m_ena <= 0;
-	   if (!m_busy) m_state <= M_INIT2; // wait for dram init
+	   m_state <= M_INIT2;
 	end
 	M_INIT2: begin
 	   wr_data <= 0;
 	   m_write <= 1;
 	   m_ena <= 1;
-	   if (m_ack) m_state <= M_INIT3;
+	   if (m_dtack) begin
+	      m_ena <= 0;
+	      m_state <= M_INIT3;
+	   end
 	end
 	M_INIT3: begin
-	   m_ena <= 0;
-	   if (!m_busy) begin
-	      m_addr <= m_addr - 24'd1;
-	      m_state <= (m_addr == 24'd1) ? M_INIT4 : M_INIT2;
-	   end
+	   m_addr <= m_addr - 24'd1;
+	   m_state <= (m_addr == 24'd1) ? M_INIT4 : M_INIT2;
 	end
 	M_INIT4: begin
 	   countdn = !countdn;
 	   state <= A;
-	   m_state <= M_R1;
+	   m_state <= M_READ;
 	end
-	M_R1: begin
+	M_READ: begin
 	   m_write <= 0;
 	   m_ena <= 1;
-	   if (m_ack) m_state <= M_R2;
-	end
-	M_R2: begin
-	   m_ena <= 0;
-	   if (!m_busy) begin
+	   if (m_dtack) begin
+	      m_ena <= 0;
 	      sym <= rd_data;
 	      m_state <= M_TM1;
 	   end
+	end
+	M_READ2: begin
+	   m_ena <= 0;
+	   m_state <= M_TM1;
 	end
 	M_TM1: begin
 	   latch_dir <= dir;
 	   wr_data <= newsym;
 	   state <= (!rst_n) ? A : next;
 	   count_d <= countdn ? count_d - 1 : count_d + 1;
-	   m_state <= M_W1;
+	   m_state <= M_WRITE;
 	end
-	M_W1: begin
+	M_WRITE: begin
 	   m_write <= 1;
 	   m_ena <= 1;
-	   if (m_ack) m_state <= M_W2;
-	end
-	M_W2: begin
-	   m_ena <= 0;
-	   if (!m_busy) m_state <= M_TM2;
+	   if (m_dtack) begin
+	      m_ena <= 0;
+	      m_state <= M_TM2;
+	   end
 	end
 	M_TM2: begin
 	   m_addr <= (latch_dir == L) ? m_addr - 24'd1 : m_addr + 24'd1;
-	   m_state <= (state != H) ? M_R1 : M_TM2;  // stop when halt
-	   // m_state <= (state != H) ? M_R1 : M_INIT1;
+	   // m_state <= (state != H) ? M_READ : M_TM2;  // stop when halt
+	   m_state <= (state != H) ? M_READ : M_INIT1;
 	end
       endcase // case (m_state)
    end // always @ (posedge clk)
 
-`define BIG 1
-`ifdef SMALL   
+`define SMALL
+`ifdef SMALL
    // A0  A1  A2  A3  A4  B0  B1  B2  B3  B4    s(M)            σ(M)
    // 1RB 3RB 2LA 0RB 1RH 2LA 4RB 3LB 2RB 3RB   15,754,273      4,099
    // >>> hex(15754273) = 0xf06421
@@ -250,9 +248,8 @@ module busybeaver
 	default: begin newsym <= 0; dir <= R; next <= H; end
       endcase // case (state)
    end // always @ (*)
-   
+
 `else
-error   
+error
 `endif
 endmodule // busybeaver
-
