@@ -518,25 +518,39 @@
 	// is deasserted on reset (active low). axi_rresp and axi_rdata are 
 	// cleared to zero on reset (active low).  
 
+   localparam integer SPI_CYCLES = 64;
+   reg [7:0] 		   axi_rdelay;
+    
 	always @( posedge S_AXI_ACLK )
 	begin
 	  if ( S_AXI_ARESETN == 1'b0 )
 	    begin
 	      axi_rvalid <= 0;
 	      axi_rresp  <= 0;
+	      axi_rdelay <= 0;
 	    end 
 	  else
 	    begin    
-	      if (axi_arv_arr_flag && ~axi_rvalid)
-	        begin
-	          axi_rvalid <= 1'b1;
-	          axi_rresp  <= 2'b0; 
-	          // 'OKAY' response
-	        end   
-	      else if (axi_rvalid && S_AXI_RREADY)
-	        begin
-	          axi_rvalid <= 1'b0;
-	        end            
+	       if (axi_arv_arr_flag && ~axi_rvalid && axi_rdelay == 0)
+		 begin
+		    axi_rdelay <= 1;   // latch that read is done and start waiting
+		 end
+	       else if (axi_rdelay > 0 && axi_rdelay < SPI_CYCLES)
+		 begin
+		    axi_rdelay <= axi_rdelay + 1;  // read is done. wait a bit.
+		 end
+	       else if (axi_rdelay == SPI_CYCLES)
+		 begin
+		    // read is done and we waited long enough. post the response
+                    axi_rvalid <= 1'b1;
+                    axi_rresp  <= 2'b0;
+                    // 'OKAY' response
+		 end
+	       if (axi_rvalid && S_AXI_RREADY)
+	         begin
+	            axi_rvalid <= 1'b0;
+	            axi_rdelay <= 0; // reset delay
+	         end            
 	    end
 	end    
 	// ------------------------------------------

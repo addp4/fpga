@@ -20,7 +20,6 @@
       "led_blinker_0": "",
       "busybeaver_0": "",
       "axi_uartlite_0": "",
-      "axi_bram_ctrl_0": "",
       "axi_smc_1": "",
       "axi_interconnect_0": {
         "xbar": "",
@@ -28,7 +27,8 @@
         "s01_couplers": {},
         "m00_couplers": {}
       },
-      "axi_bram_ctrl_0_bram": ""
+      "spiram_0": "",
+      "axi_perf_mon_0": ""
     },
     "interface_ports": {
       "uart_rtl_0": {
@@ -526,34 +526,6 @@
           }
         }
       },
-      "axi_bram_ctrl_0": {
-        "vlnv": "xilinx.com:ip:axi_bram_ctrl:4.1",
-        "ip_revision": "11",
-        "xci_name": "riscdemo_axi_bram_ctrl_0_0",
-        "xci_path": "ip/riscdemo_axi_bram_ctrl_0_0/riscdemo_axi_bram_ctrl_0_0.xci",
-        "inst_hier_path": "axi_bram_ctrl_0",
-        "parameters": {
-          "DATA_WIDTH": {
-            "value": "32"
-          },
-          "PROTOCOL": {
-            "value": "AXI4"
-          },
-          "SINGLE_PORT_BRAM": {
-            "value": "1"
-          }
-        },
-        "hdl_attributes": {
-          "BMM_INFO_ADDRESS_SPACE": {
-            "value": "byte  0x00000000 32 > riscdemo axi_bram_ctrl_0_bram",
-            "value_src": "default"
-          },
-          "KEEP_HIERARCHY": {
-            "value": "yes",
-            "value_src": "default"
-          }
-        }
-      },
       "axi_smc_1": {
         "vlnv": "xilinx.com:ip:smartconnect:1.0",
         "ip_revision": "25",
@@ -562,7 +534,7 @@
         "inst_hier_path": "axi_smc_1",
         "parameters": {
           "NUM_MI": {
-            "value": "3"
+            "value": "4"
           },
           "NUM_SI": {
             "value": "1"
@@ -584,7 +556,8 @@
             "bridges": [
               "M00_AXI",
               "M01_AXI",
-              "M02_AXI"
+              "M02_AXI",
+              "M03_AXI"
             ]
           },
           "M00_AXI": {
@@ -638,6 +611,31 @@
             }
           },
           "M02_AXI": {
+            "mode": "Master",
+            "vlnv_bus_definition": "xilinx.com:interface:aximm:1.0",
+            "vlnv": "xilinx.com:interface:aximm_rtl:1.0",
+            "parameters": {
+              "NUM_READ_OUTSTANDING": {
+                "value": "1"
+              },
+              "NUM_READ_THREADS": {
+                "value": "1"
+              },
+              "NUM_WRITE_OUTSTANDING": {
+                "value": "1"
+              },
+              "NUM_WRITE_THREADS": {
+                "value": "1"
+              },
+              "RUSER_BITS_PER_BYTE": {
+                "value": "0"
+              },
+              "WUSER_BITS_PER_BYTE": {
+                "value": "0"
+              }
+            }
+          },
+          "M03_AXI": {
             "mode": "Master",
             "vlnv_bus_definition": "xilinx.com:interface:aximm:1.0",
             "vlnv": "xilinx.com:interface:aximm_rtl:1.0",
@@ -1029,21 +1027,27 @@
           }
         }
       },
-      "axi_bram_ctrl_0_bram": {
-        "vlnv": "xilinx.com:ip:blk_mem_gen:8.4",
-        "ip_revision": "9",
-        "xci_name": "riscdemo_axi_bram_ctrl_0_bram_1",
-        "xci_path": "ip/riscdemo_axi_bram_ctrl_0_bram_1/riscdemo_axi_bram_ctrl_0_bram_1.xci",
-        "inst_hier_path": "axi_bram_ctrl_0_bram"
+      "spiram_0": {
+        "vlnv": "user.org:user:spiram:1.0",
+        "ip_revision": "15",
+        "xci_name": "riscdemo_spiram_0_0",
+        "xci_path": "ip/riscdemo_spiram_0_0/riscdemo_spiram_0_0.xci",
+        "inst_hier_path": "spiram_0"
+      },
+      "axi_perf_mon_0": {
+        "vlnv": "xilinx.com:ip:axi_perf_mon:5.0",
+        "ip_revision": "35",
+        "xci_name": "riscdemo_axi_perf_mon_0_0",
+        "xci_path": "ip/riscdemo_axi_perf_mon_0_0/riscdemo_axi_perf_mon_0_0.xci",
+        "inst_hier_path": "axi_perf_mon_0",
+        "parameters": {
+          "C_ENABLE_PROFILE": {
+            "value": "1"
+          }
+        }
       }
     },
     "interface_nets": {
-      "axi_bram_ctrl_0_BRAM_PORTA": {
-        "interface_ports": [
-          "axi_bram_ctrl_0_bram/BRAM_PORTA",
-          "axi_bram_ctrl_0/BRAM_PORTA"
-        ]
-      },
       "axi_gpio_0_GPIO": {
         "interface_ports": [
           "gpio_rtl_0",
@@ -1053,7 +1057,8 @@
       "axi_interconnect_0_M00_AXI": {
         "interface_ports": [
           "axi_interconnect_0/M00_AXI",
-          "axi_bram_ctrl_0/S_AXI"
+          "spiram_0/S00_AXI",
+          "axi_perf_mon_0/SLOT_0_AXI"
         ]
       },
       "axi_quad_spi_0_SPI_0": {
@@ -1078,6 +1083,12 @@
         "interface_ports": [
           "axi_smc_1/M02_AXI",
           "axi_uartlite_0/S_AXI"
+        ]
+      },
+      "axi_smc_1_M03_AXI": {
+        "interface_ports": [
+          "axi_smc_1/M03_AXI",
+          "axi_perf_mon_0/S_AXI"
         ]
       },
       "axi_uartlite_0_UART": {
@@ -1156,13 +1167,16 @@
           "axi_gpio_0/s_axi_aclk",
           "axi_quad_spi_0/s_axi_aclk",
           "axi_uartlite_0/s_axi_aclk",
-          "axi_bram_ctrl_0/s_axi_aclk",
           "axi_smc_1/aclk",
           "led_blinker_0/CLK_50",
           "axi_interconnect_0/ACLK",
           "axi_interconnect_0/S00_ACLK",
           "axi_interconnect_0/M00_ACLK",
-          "axi_interconnect_0/S01_ACLK"
+          "axi_interconnect_0/S01_ACLK",
+          "axi_perf_mon_0/core_aclk",
+          "axi_perf_mon_0/s_axi_aclk",
+          "axi_perf_mon_0/slot_0_axi_aclk",
+          "spiram_0/s00_axi_aclk"
         ]
       },
       "reset_rtl_0_1": {
@@ -1184,12 +1198,15 @@
           "axi_gpio_0/s_axi_aresetn",
           "axi_quad_spi_0/s_axi_aresetn",
           "axi_uartlite_0/s_axi_aresetn",
-          "axi_bram_ctrl_0/s_axi_aresetn",
           "axi_smc_1/aresetn",
           "axi_interconnect_0/S00_ARESETN",
           "axi_interconnect_0/M00_ARESETN",
           "axi_interconnect_0/ARESETN",
-          "axi_interconnect_0/S01_ARESETN"
+          "axi_interconnect_0/S01_ARESETN",
+          "axi_perf_mon_0/core_aresetn",
+          "axi_perf_mon_0/s_axi_aresetn",
+          "axi_perf_mon_0/slot_0_axi_aresetn",
+          "spiram_0/s00_axi_aresetn"
         ]
       }
     },
@@ -1198,14 +1215,14 @@
         "address_spaces": {
           "Data": {
             "segments": {
-              "SEG_axi_bram_ctrl_0_Mem0": {
-                "address_block": "/axi_bram_ctrl_0/S_AXI/Mem0",
-                "offset": "0x00000000",
-                "range": "64K"
-              },
               "SEG_axi_gpio_0_Reg": {
                 "address_block": "/axi_gpio_0/S_AXI/Reg",
                 "offset": "0x40000000",
+                "range": "64K"
+              },
+              "SEG_axi_perf_mon_0_Reg": {
+                "address_block": "/axi_perf_mon_0/S_AXI/Reg",
+                "offset": "0x44A10000",
                 "range": "64K"
               },
               "SEG_axi_quad_spi_0_Reg": {
@@ -1218,15 +1235,24 @@
                 "address_block": "/axi_uartlite_0/S_AXI/Reg",
                 "offset": "0x40600000",
                 "range": "64K"
+              },
+              "SEG_spiram_0_S00_AXI_mem": {
+                "address_block": "/spiram_0/S00_AXI/S00_AXI_mem",
+                "offset": "0x00000000",
+                "range": "64K",
+                "offset_base_param": "C_S00_AXI_BASEADDR",
+                "offset_high_param": "C_S00_AXI_HIGHADDR"
               }
             }
           },
           "Instruction": {
             "segments": {
-              "SEG_axi_bram_ctrl_0_Mem0": {
-                "address_block": "/axi_bram_ctrl_0/S_AXI/Mem0",
+              "SEG_spiram_0_S00_AXI_mem": {
+                "address_block": "/spiram_0/S00_AXI/S00_AXI_mem",
                 "offset": "0x00000000",
-                "range": "64K"
+                "range": "64K",
+                "offset_base_param": "C_S00_AXI_BASEADDR",
+                "offset_high_param": "C_S00_AXI_HIGHADDR"
               }
             }
           }
@@ -1237,7 +1263,7 @@
       "file": {
         "name": "../../../../../xc7a15t_vitis/xc7a15t/Debug/xc7a15t.elf",
         "type": "ELF",
-        "checksum": "4277855533",
+        "checksum": "734346442",
         "IsVisible": "1",
         "ScopedToRef": "riscdemo",
         "ScopedToCell": [
