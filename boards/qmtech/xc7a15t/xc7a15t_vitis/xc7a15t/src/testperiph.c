@@ -14,7 +14,8 @@
 static int spi_pass;
 static int psram_errors;
 static int word;
-static int pattern = 0;
+static int pattern;
+static uint32_t rd_empty;
 
 void flash_led() {
   static int led = 0;
@@ -49,6 +50,11 @@ void perfmon_init() {
     xil_printf("pmon: cr=0x%x\n", *pmon_cr);
 }
 
+uint32_t cycles() {
+  int *pmon_sr = (int *)(XPAR_AXIPMON_0_BASEADDR + 0x2c);
+  return *pmon_sr;
+}
+
 #define PMON_METRIC(n) *(int *)(XPAR_AXIPMON_0_BASEADDR + 0x200 + 0x10*(n))
 // void perfmon_print() __attribute__ ((section(".data")));
 void perfmon_print() {
@@ -61,6 +67,14 @@ void perfmon_print() {
     xil_printf("wlat=%d rlat=%d) ",
 	       PMON_METRIC(2) / PMON_METRIC(1),
 	       PMON_METRIC(5) / PMON_METRIC(4)
+	       );
+    xil_printf("slot1(wb=%d wtx=%d wcy=%d ",
+	       PMON_METRIC(6), PMON_METRIC(7), PMON_METRIC(8));
+    xil_printf("rby=%d rtx=%d rcy=%d ",
+	       PMON_METRIC(9), PMON_METRIC(10), PMON_METRIC(11));
+    xil_printf("wlat=%d rlat=%d) ",
+	       PMON_METRIC(8) / PMON_METRIC(7),
+	       PMON_METRIC(11) / PMON_METRIC(10)
 	       );
     xil_printf("\r");
 }
@@ -139,9 +153,32 @@ void spi_end() {
   asm volatile("nop");
 }
 
+/*
+  expected:
+  read word: wtxn = 9 + 2, rtxn = 18  (+2 for CSn writes to *spissr)
+  write word: wtxn = 8 + 2, rtxn = 16
+  total: wtxn = 17 + 4, rtxn = 34 = 55 (matches observed)
+
+  observed:
+  for 132072 reads and writes
+     pmon: slot1(wb=11010072 wtx=2752518 wcy=13762590 rby=17825868 rtx=4456467 rcy=64553213 wlat=5 rlat=14)
+  wtx / writes = 2752518 / 132072 = 21
+  rtx / reads  = 4456467 / 132072 = 34
+
+  end to end:
+  tx_cycles=720 rx_cycles=860 per 32-bit word
+  at face value, not considering C overhead
+  860 cycles/rxword => 215 cycles/byte => 6 cycles per axi txn[
+  720 cycles/txword => 180 cycles/txbyte => 8.5 cycles per axi txn
+
+  derive C overhead from known txn counts
+  from 21 txn per write, tx cycles = 720 = 21 * (axi_cost + c_cost)
+  from 34 txn per read, rx cycles = 860 = 34 * (axi_cost + c_cost)
+
+*/
 uint32_t spi_read_byte() {
   while (*spisr & 1)  // spin while rx is empty
-    ;
+    rd_empty += 1;
   return (*spidrr) & 0xff;  // read from receive fifo
 }
 
@@ -290,6 +327,7 @@ void psram_init() {
   psram_errors = 0;
   word = 0;
   pattern = 0;
+  rd_empty = 0;
 
   *spissr = 1;  // wake device by toggling CSn
 #if DEVICE == DEVICE_MICROCHIP_23LC1024
@@ -308,7 +346,7 @@ void psram_init() {
 }
 
 void psram_test() {
-  vt100_at(9, 1);
+  // vt100_at(9, 1);
 
 #if DEVICE == DEVICE_APS6404L
   xil_printf("device_id mfid=0x%x kgd=0x%x eid=%llx [%s %d mbit]\r",
@@ -332,6 +370,7 @@ void psram_test() {
   xil_printf("pass %d pattern=%d ", spi_pass++, pattern);
 
   xil_printf("[%d,%d) writing...", word * 4, (word + step_words) * 4);
+  uint32_t start_time = cycles();
   for (int i = word; i < word + step_words; i++) {
     uint32_t out;
     switch (pattern) {
@@ -341,9 +380,10 @@ void psram_test() {
     }
     psram_write32(i * 4, out);
   }
+  uint32_t write_cycles = (cycles() - start_time) / step_words;
 
   xil_printf("reading...");
-  int error_position = -1;
+  start_time = cycles();
   for (int i = word; i < word + step_words; i++) {
     uint32_t data = psram_fastread_32(i * 4);
     uint32_t out;
@@ -354,10 +394,9 @@ void psram_test() {
     }
     if (data != out) {
       psram_errors += 1;
-      if (error_position == -1)
-    	  error_position = i;
     }
   }
+  uint32_t read_cycles = (cycles() - start_time) / step_words;
 
   word += step_words;
   if (word >= num_words) {
@@ -365,7 +404,8 @@ void psram_test() {
 	  pattern = (pattern + 1) % 3;
   }
 
-  xil_printf(RED "errors=%d" WHITE "(first error pos=%d)\r", psram_errors, error_position);
+  xil_printf(RED "errors=%d" WHITE " rx_cycles=%u tx_cycles=%u\r",
+	     psram_errors, read_cycles, write_cycles);
 }
 
 void spi_all() {

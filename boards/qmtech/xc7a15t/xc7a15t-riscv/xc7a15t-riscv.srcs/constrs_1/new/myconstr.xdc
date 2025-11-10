@@ -28,13 +28,13 @@ set_property PACKAGE_PIN D8 [get_ports {gpio_rtl_0_tri_o[1]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {spi_rtl_0_ss_io[0]}]
 set_property PACKAGE_PIN F18 [get_ports {spi_rtl_0_ss_io[0]}]
 # MISO = dip pin 2
-set_property IOSTANDARD LVCMOS33 [get_ports spi_rtl_0_io1_io]        
+set_property IOSTANDARD LVCMOS33 [get_ports spi_rtl_0_io1_io]
 set_property PACKAGE_PIN E18 [get_ports spi_rtl_0_io1_io]
 # MOSI = dip pin 5
-set_property IOSTANDARD LVCMOS33 [get_ports spi_rtl_0_io0_io]       
+set_property IOSTANDARD LVCMOS33 [get_ports spi_rtl_0_io0_io]
 set_property PACKAGE_PIN D18 [get_ports spi_rtl_0_io0_io]
 # SCK = dip pin 6
-set_property IOSTANDARD LVCMOS33 [get_ports spi_rtl_0_sck_io]        
+set_property IOSTANDARD LVCMOS33 [get_ports spi_rtl_0_sck_io]
 set_property PACKAGE_PIN C17 [get_ports spi_rtl_0_sck_io]
 
 #
@@ -47,3 +47,5 @@ set_property PACKAGE_PIN M1 [get_ports led_0]
 #
 set_property IOSTANDARD LVCMOS33 [get_ports led_1]
 set_property PACKAGE_PIN N2 [get_ports led_1]
+
+
