@@ -216,13 +216,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	//------------------------------------------------
    wire [OPT_MEM_ADDR_BITS:0] mem_address;
    reg [C_S_AXI_DATA_WIDTH-1:0]    mem_data_out;
-   wire [2:0] 			     fifo_depth;
-   reg [2:0] 			     fifo_head;
-   reg [2:0] 			     fifo_tail;
-   reg [C_S_AXI_ADDR_WIDTH-1 : 0]    fifo_addr[3:0];
-   reg 				     fifo_is_rx[3:0];
    localparam integer 		     SPI_FIFO_DELAY = 64;
-   reg [7:0] 			     fifo_delay;
    wire 			     spi_fifo_empty;
 
    reg [31:0]                        axi_counter = 0;
@@ -292,16 +286,6 @@ module spiram_slave_full_v1_0_S00_AXI #
 	assign  ar_wrap_size = (C_S_AXI_DATA_WIDTH/8 * (axi_arlen));
 	assign  aw_wrap_en = ((axi_awaddr & aw_wrap_size) == aw_wrap_size)? 1'b1: 1'b0;
 	assign  ar_wrap_en = ((axi_araddr & ar_wrap_size) == ar_wrap_size)? 1'b1: 1'b0;
-
-   assign spi_fifo_empty = myrd_empty && ~mywr_en;
-   /*
-    compute fifo depth from head and tail
-    Suppose fifo size is 2 and head and tail are 3 bits
-    tail=4 head=1 => tail-head = 3, ok
-    tail=0 head=5 => tail-head = 3'b011 = 3, ok
-    tail=1 head=5 => tail-head = 3'b100 = 4, ok
-    */
-   assign fifo_depth = fifo_tail - fifo_head;
 
 	// Implement axi_awready generation
 
@@ -624,6 +608,8 @@ module spiram_slave_full_v1_0_S00_AXI #
 	// -- Example code to access user logic memory region
 	// ------------------------------------------
 
+   assign spi_fifo_empty = myrd_empty && ~mywr_en;
+
    /* Latch all read or write parameters. We may need to wait for
     memory to be ready and meanwhile incoming axi requests could
     overwrite the parameters.  */
@@ -789,9 +775,6 @@ end // block: BYTE_BRAM_GEN
      begin
 	if ( S_AXI_ARESETN == 1'b0 )
 	  begin
-	     fifo_head  <= 0;
-	     fifo_tail  <= 0;
-	     fifo_delay <= 0;
              myfifo_delay <= 0;
 	  end
 	else
@@ -801,25 +784,6 @@ end // block: BYTE_BRAM_GEN
 
 	     // simulate dequeue from fifo every SPI_FIFO_DELAY cycles
 
-	     if (fifo_depth != 0)
-	       begin
-		  if (fifo_delay == 0)
-		    begin
-		       if (fifo_is_rx[fifo_tail[1:0]])
-			 fifo_addr[fifo_tail[1:0]] <= axi_araddr;
-		       else
-			 fifo_addr[fifo_tail[1:0]] <= axi_awaddr;
-		    end
-		  if (fifo_delay == SPI_FIFO_DELAY)
-		    begin
-		       fifo_head  <= fifo_head + 1;
-		       fifo_delay <= 0;
-		    end
-		  else
-		    fifo_delay <= fifo_delay + 1;
-	       end // if (fifo_depth != 0)
-
-             // parallel actions for woof_fifo until it can take over
              myrd_en <= 0;
              if (!myrd_empty)
                begin
