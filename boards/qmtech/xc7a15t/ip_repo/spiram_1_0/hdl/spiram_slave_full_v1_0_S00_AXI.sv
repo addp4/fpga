@@ -1,7 +1,7 @@
 `timescale 1 ns / 1 ps
 
 `include "/home/nomura/git/fpga/modules/woof_fifo/woof_fifo.sv"
-`include "/home/nomura/git/fpga/modules/woof_simple_spi/woof_simple_spi.sv"
+`include "/home/nomura/git/fpga/modules/woof_simple_spi/simple_spi.sv"
 
 module spiram_slave_full_v1_0_S00_AXI #
 	(
@@ -210,14 +210,12 @@ module spiram_slave_full_v1_0_S00_AXI #
 
 	localparam integer ADDR_LSB = (C_S_AXI_DATA_WIDTH/32)+ 1;
 	localparam integer OPT_MEM_ADDR_BITS = 13;
-	localparam integer USER_NUM_MEM = 1;
 
 	//----------------------------------------------
 	//-- Signals for user logic memory space example
 	//------------------------------------------------
-	wire [OPT_MEM_ADDR_BITS:0] mem_address;
-	wire [USER_NUM_MEM-1:0] mem_select;
-	reg [C_S_AXI_DATA_WIDTH-1:0] mem_data_out[0 : USER_NUM_MEM-1];
+   wire [OPT_MEM_ADDR_BITS:0] mem_address;
+   reg [C_S_AXI_DATA_WIDTH-1:0]    mem_data_out;
    wire [2:0] 			     fifo_depth;
    reg [2:0] 			     fifo_head;
    reg [2:0] 			     fifo_tail;
@@ -227,6 +225,10 @@ module spiram_slave_full_v1_0_S00_AXI #
    reg [7:0] 			     fifo_delay;
    wire 			     spi_fifo_empty;
 
+   reg [31:0]                        axi_counter = 0;
+   reg [31:0]                        status_word = 0;
+   reg [31:0]                        status_word2 = 0;
+   reg [31:0]                        status_word3 = 0;
 
    /*
       &&& WOOF FIFO &&&
@@ -237,7 +239,7 @@ module spiram_slave_full_v1_0_S00_AXI #
    reg                               myrd_en;
    reg [C_S_AXI_ADDR_WIDTH - 1:0]    mywr_data;
    wire                              myrd_empty;
-   wire                              mywr_full;   
+   wire                              mywr_full;
    wire [C_S_AXI_ADDR_WIDTH - 1:0]   myrd_data;
    reg [7:0] 			     myfifo_delay;
 
@@ -254,8 +256,7 @@ module spiram_slave_full_v1_0_S00_AXI #
       .rd_data(myrd_data),
       .rd_empty(myrd_empty)
       );
-   
-  
+
 	genvar i;
 	genvar j;
 	genvar mem_byte_index;
@@ -302,7 +303,7 @@ module spiram_slave_full_v1_0_S00_AXI #
       end
    endtask
 
-   
+
 	// Implement axi_awready generation
 
 	// axi_awready is asserted for one S_AXI_ACLK clock cycle when both
@@ -363,6 +364,22 @@ module spiram_slave_full_v1_0_S00_AXI #
 	          axi_awlen_cntr <= 0;
 		   // $display("enqueue write in case 0 at time=%t", $time);
 		   // enqueue(0);
+
+                   /*
+                    0x04090408
+                    read burst len 3       4 transfers
+                    read burst size 2      4 bytes per transfer
+                    write burst len 3, 0   4 or 1 transfers
+                    write burst size 2     4 bytes per transfer
+
+                    AxLEN[7:0] has 8 bits, which specifies a range of 1-256 data transfers in a transaction.
+                    AxSize[2:0] describes the maximum number of bytes to transfer in each data transfer. Three bits of encoding indicate 1, 2, 4, 8, 16, 32, 64, or 128 bytes per transfer.
+                    */
+
+                   // set Nth bit (at offset 8) for write burst length N in 0..7
+                   status_word[16 + S_AXI_ARLEN[2:0]] <= 1;
+                   // set Nth bit (at offset 12) for write burst size N in 0..7
+                   status_word[24 + S_AXI_ARSIZE[2:0]] <= 1;
 	        end
 	      else if ((axi_awlen_cntr < axi_awlen) && axi_wready && S_AXI_WVALID)
 	        begin
@@ -406,7 +423,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	        end // if ((axi_awlen_cntr < axi_awlen) && axi_wready && S_AXI_WVALID && spi_fifo_empty)
 	    end // else: !if( S_AXI_ARESETN == 1'b0 )
 	end // always @ ( posedge S_AXI_ACLK )
-   
+
 	// Implement axi_wready generation
 
 	// axi_wready is asserted for one S_AXI_ACLK clock cycle when both
@@ -422,9 +439,9 @@ module spiram_slave_full_v1_0_S00_AXI #
 	    end
 	  else
 	    begin
-               
+
                mywr_enw <= 0;    // asserted for 1 cycle if enqueue
-               
+
 	      if ( ~axi_wready && S_AXI_WVALID && axi_awv_awr_flag && spi_fifo_empty)
 	        begin
 	          // slave can accept the write data
@@ -523,7 +540,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	  else
 	    begin
                mywr_enr <= 0;
-               
+
 	      if (~axi_arready && S_AXI_ARVALID && ~axi_arv_arr_flag && spi_fifo_empty)
 	        begin
 	          // address latching
@@ -535,6 +552,10 @@ module spiram_slave_full_v1_0_S00_AXI #
 	          axi_rlast <= 1'b0;
 		   enqueue_read();
 		   $display("enqueue read in case 0");
+                   // set Nth bit (at offset 0) for read burst length N in 0..15
+                   status_word[0 + S_AXI_ARLEN[2:0]] <= 1;
+                   // set Nth bit (at offset 16) for read burst size N in 0..7
+                   status_word[8 + S_AXI_ARSIZE[2:0]] <= 1;
 	        end
 	      else if((axi_arlen_cntr < axi_arlen) && axi_rvalid && S_AXI_RREADY && spi_fifo_empty)
 	        begin
@@ -618,78 +639,81 @@ module spiram_slave_full_v1_0_S00_AXI #
 	         begin
 	            axi_rvalid <= 1'b0;
 	         end
-	    end
+	    end // else: !if( S_AXI_ARESETN == 1'b0 )
+
 	end
 	// ------------------------------------------
 	// -- Example code to access user logic memory region
 	// ------------------------------------------
 
-	generate
-	  if (USER_NUM_MEM >= 1)
-	    begin
-	      assign mem_select  = 1;
-	      assign mem_address = (axi_arv_arr_flag? axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]:(axi_awv_awr_flag? axi_awaddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]:0));
-	    end
-	endgenerate
+   reg [63:0] mreq;
+
+   always @(posedge S_AXI_ACLK)
+     axi_counter <= axi_counter + 1;
 
 	// implement Block RAM(s)
-	generate
-	  for(i=0; i<= USER_NUM_MEM-1; i=i+1)
-	    begin:BRAM_GEN
-	      wire mem_rden;
-	      wire mem_wren;
+   wire mem_rden;
+   wire mem_wren;
 
-	      assign mem_wren = axi_wready && S_AXI_WVALID ;
+   assign mem_wren = axi_wready && S_AXI_WVALID ;
 
-	      assign mem_rden = axi_arv_arr_flag ; //& ~axi_rvalid
+   assign mem_rden = axi_arv_arr_flag ; //& ~axi_rvalid
 
-	       // AXI_DATA_WIDTH is 32, so mem_byte_index goes from [0..3]
-	      for (mem_byte_index = 0; mem_byte_index < C_S_AXI_DATA_WIDTH/8; mem_byte_index = mem_byte_index+1)
-	      begin:BYTE_BRAM_GEN
-	        wire [8-1:0] data_in ;
-	        wire [8-1:0] data_out;
-	        reg  [8-1:0] byte_ram [0 : 16383];
-	        integer  j;
+   assign mem_address = (axi_arv_arr_flag? axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]:(axi_awv_awr_flag? axi_awaddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]:0));
 
-	        //assigning 8 bit data
-	        assign data_in  = S_AXI_WDATA[(mem_byte_index*8+7) -: 8];
-		assign data_out = byte_ram[mem_address];
+   /* Latch all read or write parameters. We may need to wait for
+    memory to be ready and meanwhile incoming axi requests could
+    overwrite the parameters.  */
 
-	        always @( posedge S_AXI_ACLK )
-	        begin
-	          if (mem_wren && S_AXI_WSTRB[mem_byte_index])
-	            begin
-	              byte_ram[mem_address] <= data_in;
-	            end
-	        end
+   // AXI_DATA_WIDTH is 32, so mem_byte_index goes from [0..3]
+   for (mem_byte_index = 0; mem_byte_index < C_S_AXI_DATA_WIDTH/8; mem_byte_index = mem_byte_index+1)
+     begin:BYTE_BRAM_GEN
+	wire [8-1:0] data_in ;
+	wire [8-1:0] data_out;
+	reg [8-1:0]  byte_ram [0 : 16383];
 
-	        always @( posedge S_AXI_ACLK )
-	        begin
-	          if (mem_rden)
-	            begin
-	              mem_data_out[i][(mem_byte_index*8+7) -: 8] <= data_out;
-	            end
-	        end
+	//assigning 8 bit data
+	assign data_in  = S_AXI_WDATA[(mem_byte_index*8+7) -: 8];
+	assign data_out = byte_ram[mem_address];
 
-	      end  // for
+        always @( posedge S_AXI_ACLK )
+          begin
+	     if (mem_wren && S_AXI_WSTRB[mem_byte_index])
+               begin
+	          byte_ram[mem_address] <= data_in;
+               end
+          end
+   always @( posedge S_AXI_ACLK )
+     begin
+	if (mem_rden)
+	  begin
+	     mem_data_out[(mem_byte_index*8+7) -: 8] <= data_out;
 	  end
-	endgenerate
-	//Output register or memory read data
+     end
+end // block: BYTE_BRAM_GEN
 
-	always @( mem_data_out, axi_rvalid)
-	begin
-	  if (axi_rvalid)
-	    begin
-	      // Read address mux
-	      axi_rdata <= mem_data_out[0];
-	    end
-	  else
-	    begin
-	      axi_rdata <= 32'hdeafbabe;
-	    end
-	end
+   //Output register or memory read data
 
-	// Add user logic here
+   always @( mem_data_out, axi_rvalid)
+     begin
+        if (mem_wren && S_AXI_WSTRB != 4'b1111)
+          status_word3 <= axi_counter; // record last time of partial write
+	if (axi_rvalid)
+	  begin
+             case (axi_araddr)
+               16'hfff0: axi_rdata <= status_word;
+               16'hfff4: axi_rdata <= status_word2;
+               16'hfff8: axi_rdata <= status_word3;
+               default: axi_rdata <= mem_data_out;
+             endcase // case (axi_araddr)
+	  end
+	else
+	  begin
+	     axi_rdata <= 32'hdeafbabe;
+	  end
+     end
+
+   // Add user logic here
 
 /* The "user logic" for now is a simulated FIFO between the AXI bus
  interface and a to-be-written PSRAM memory controller. The FIFO
@@ -710,6 +734,9 @@ module spiram_slave_full_v1_0_S00_AXI #
 	  end
 	else
 	  begin
+           if (axi_wready && S_AXI_WVALID)
+             status_word2[S_AXI_WSTRB] <= 1;
+
 	     // simulate dequeue from fifo every SPI_FIFO_DELAY cycles
 
 	     if (fifo_depth != 0)
