@@ -230,22 +230,34 @@ module spiram_slave_full_v1_0_S00_AXI #
    reg [31:0]                        status_word2 = 0;
    reg [31:0]                        status_word3 = 0;
 
+   typedef struct packed {
+      logic        write_enable;
+      logic [3:0]  wstrb;
+      logic [31:0] data;
+      logic [15:0] address;
+   } transaction_t;
+   localparam integer TXN_WIDTH = $bits(transaction_t);
+
+   transaction_t txn;
+   reg [4:0]          state_txn = 0;
+   reg [4:0]          state_txn_next = 0;
+
    /*
       &&& WOOF FIFO &&&
     */
-   wire                              mywr_en;
-   reg                               mywr_enr;
-   reg                               mywr_enw;
-   reg                               myrd_en;
-   reg [C_S_AXI_ADDR_WIDTH - 1:0]    mywr_data;
-   wire                              myrd_empty;
-   wire                              mywr_full;
-   wire [C_S_AXI_ADDR_WIDTH - 1:0]   myrd_data;
-   reg [7:0] 			     myfifo_delay;
+   transaction_t   mywr_data;
+   transaction_t   myrd_data;
+   reg             wr_txn_busy = 0;
+   reg             rd_txn_busy = 0;
 
-   assign mywr_data = mywr_enr ? axi_araddr : axi_awaddr;
-   assign mywr_en = mywr_enr | mywr_enw;
-   woof_fifo #( .WIDTH(C_S_AXI_ADDR_WIDTH) ) fif
+   reg             myrd_en;
+   wire            myrd_empty;
+   reg             mywr_en;
+   wire            mywr_full;
+   reg [7:0]       myfifo_delay;
+
+   assign mywr_data = txn;
+   woof_fifo #( .WIDTH(TXN_WIDTH) ) fif
      (
       .clock(S_AXI_ACLK),
       .reset_n(S_AXI_ARESETN),
@@ -281,7 +293,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	assign  aw_wrap_en = ((axi_awaddr & aw_wrap_size) == aw_wrap_size)? 1'b1: 1'b0;
 	assign  ar_wrap_en = ((axi_araddr & ar_wrap_size) == ar_wrap_size)? 1'b1: 1'b0;
 
-   assign spi_fifo_empty = myrd_empty && ~mywr_en;  // fifo_depth == 0;
+   assign spi_fifo_empty = myrd_empty && ~mywr_en;
    /*
     compute fifo depth from head and tail
     Suppose fifo size is 2 and head and tail are 3 bits
@@ -290,19 +302,6 @@ module spiram_slave_full_v1_0_S00_AXI #
     tail=1 head=5 => tail-head = 3'b100 = 4, ok
     */
    assign fifo_depth = fifo_tail - fifo_head;
-
-   task enqueue_read();
-      begin
-         mywr_enr <= 1;
-      end
-   endtask
-
-   task enqueue_write();
-      begin
-         mywr_enw <= 1;
-      end
-   endtask
-
 
 	// Implement axi_awready generation
 
@@ -319,7 +318,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	    end
 	  else
 	    begin
-	      if (~axi_awready && S_AXI_AWVALID && ~axi_awv_awr_flag && ~axi_arv_arr_flag && spi_fifo_empty)
+	      if (~axi_awready && S_AXI_AWVALID && ~axi_awv_awr_flag && ~axi_arv_arr_flag && state_txn == 0)
 	        begin
 	          // slave is ready to accept an address and
 	          // associated control signals
@@ -362,8 +361,6 @@ module spiram_slave_full_v1_0_S00_AXI #
 	          axi_awlen <= S_AXI_AWLEN;
 	          // start address of transfer
 	          axi_awlen_cntr <= 0;
-		   // $display("enqueue write in case 0 at time=%t", $time);
-		   // enqueue(0);
 
                    /*
                     0x04090408
@@ -383,9 +380,6 @@ module spiram_slave_full_v1_0_S00_AXI #
 	        end
 	      else if ((axi_awlen_cntr < axi_awlen) && axi_wready && S_AXI_WVALID)
 	        begin
-		   // $display("enqueue write in case 1 at time=%t axi_awlen_cntr=%d axi_awlen=%d", $time, axi_awlen_cntr, axi_awlen);
-		   // enqueue(0);
-
 	          axi_awlen_cntr <= axi_awlen_cntr + 1;
 
 	          case (axi_awburst)
@@ -420,7 +414,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	                //for awsize = 4 bytes (010)
 	              end
 	          endcase
-	        end // if ((axi_awlen_cntr < axi_awlen) && axi_wready && S_AXI_WVALID && spi_fifo_empty)
+	        end // if ((axi_awlen_cntr < axi_awlen) && axi_wready && S_AXI_WVALID)
 	    end // else: !if( S_AXI_ARESETN == 1'b0 )
 	end // always @ ( posedge S_AXI_ACLK )
 
@@ -435,25 +429,18 @@ module spiram_slave_full_v1_0_S00_AXI #
 	  if ( S_AXI_ARESETN == 1'b0 )
 	    begin
 	       axi_wready <= 1'b0;
-               mywr_enw <= 0;
 	    end
 	  else
 	    begin
-
-               mywr_enw <= 0;    // asserted for 1 cycle if enqueue
-
-	      if ( ~axi_wready && S_AXI_WVALID && axi_awv_awr_flag && spi_fifo_empty)
+	      if ( ~axi_wready && S_AXI_WVALID && axi_awv_awr_flag && state_txn == 4)
 	        begin
 	          // slave can accept the write data
 	          axi_wready <= 1'b1;
-		   $display("assert wready <= 1 at t=%t, slave accepts write data %x at latched address %x", $time, S_AXI_WDATA, axi_awaddr);
-		   enqueue_write();
 	        end
 	      //else if (~axi_awv_awr_flag)
 	      else if (axi_wready)  // if (S_AXI_WLAST && axi_wready)
 	        begin
 	           axi_wready <= 1'b0;
-		   $display("write wready <= 0 at t=%t, hold further write data", $time);
 	        end
 	    end
 	end
@@ -505,12 +492,12 @@ module spiram_slave_full_v1_0_S00_AXI #
 	    end
 	  else
 	    begin
-	      if (~axi_arready && S_AXI_ARVALID && ~axi_awv_awr_flag && ~axi_arv_arr_flag && spi_fifo_empty)
+	      if (~axi_arready && S_AXI_ARVALID && ~axi_awv_awr_flag && ~axi_arv_arr_flag && state_txn == 0)
 	        begin
 	          axi_arready <= 1'b1;
 	          axi_arv_arr_flag <= 1'b1;
 	        end
-	      else if (axi_rvalid && S_AXI_RREADY && axi_arlen_cntr == axi_arlen && spi_fifo_empty)
+	      else if (axi_rvalid && S_AXI_RREADY && axi_arlen_cntr == axi_arlen)
 	      // preparing to accept next address after current read completion
 	        begin
 	          axi_arv_arr_flag  <= 1'b0;
@@ -535,13 +522,10 @@ module spiram_slave_full_v1_0_S00_AXI #
 	      axi_arlen <= 0;
 	      axi_rlast <= 1'b0;
 	      axi_ruser <= 0;
-               mywr_enr <= 0;
 	    end
 	  else
 	    begin
-               mywr_enr <= 0;
-
-	      if (~axi_arready && S_AXI_ARVALID && ~axi_arv_arr_flag && spi_fifo_empty)
+	      if (~axi_arready && S_AXI_ARVALID && ~axi_arv_arr_flag)
 	        begin
 	          // address latching
 	          axi_araddr <= S_AXI_ARADDR[C_S_AXI_ADDR_WIDTH - 1:0];
@@ -550,18 +534,13 @@ module spiram_slave_full_v1_0_S00_AXI #
 	          // start address of transfer
 	          axi_arlen_cntr <= 0;
 	          axi_rlast <= 1'b0;
-		   enqueue_read();
-		   $display("enqueue read in case 0");
                    // set Nth bit (at offset 0) for read burst length N in 0..15
                    status_word[0 + S_AXI_ARLEN[2:0]] <= 1;
                    // set Nth bit (at offset 16) for read burst size N in 0..7
                    status_word[8 + S_AXI_ARSIZE[2:0]] <= 1;
 	        end
-	      else if((axi_arlen_cntr < axi_arlen) && axi_rvalid && S_AXI_RREADY && spi_fifo_empty)
+	      else if((axi_arlen_cntr < axi_arlen) && axi_rvalid && S_AXI_RREADY)
 	        begin
-		   $display("enqueue read in case 1 at time=%t axi_arlen_cntr=%d axi_arlen=%d", $time, axi_arlen_cntr, axi_arlen);
-		   enqueue_read();
-
 	          axi_arlen_cntr <= axi_arlen_cntr + 1;
 	          axi_rlast <= 1'b0;
 
@@ -599,18 +578,17 @@ module spiram_slave_full_v1_0_S00_AXI #
 	              end
 	          endcase
 	        end
-	      else if((axi_arlen_cntr == axi_arlen) && ~axi_rlast && axi_arv_arr_flag && spi_fifo_empty)
+	      else if((axi_arlen_cntr == axi_arlen) && ~axi_rlast && axi_arv_arr_flag)
 	        begin
-		   $display("read case 2 at t=%t", $time);
 	          axi_rlast <= 1'b1;
 	        end
-	      else if (S_AXI_RREADY)
+	       else if (!S_AXI_RREADY)
 	        begin
 	          axi_rlast <= 1'b0;
 	        end
 	    end
 	end
-	// Implement axi_arvalid generation
+	// Implement axi_rvalid generation
 
 	// axi_rvalid is asserted for one S_AXI_ACLK clock cycle when both
 	// S_AXI_ARVALID and axi_arready are asserted. The slave registers
@@ -629,7 +607,7 @@ module spiram_slave_full_v1_0_S00_AXI #
 	    end
 	  else
 	    begin
-	       if (axi_arv_arr_flag && ~axi_rvalid && spi_fifo_empty)
+	       if (axi_arv_arr_flag && ~axi_rvalid && state_txn == 8)
 		 begin
                     axi_rvalid <= 1'b1;
                     axi_rresp  <= 2'b0;
@@ -646,10 +624,94 @@ module spiram_slave_full_v1_0_S00_AXI #
 	// -- Example code to access user logic memory region
 	// ------------------------------------------
 
-   reg [63:0] mreq;
+   /* Latch all read or write parameters. We may need to wait for
+    memory to be ready and meanwhile incoming axi requests could
+    overwrite the parameters.  */
 
    always @(posedge S_AXI_ACLK)
-     axi_counter <= axi_counter + 1;
+     begin
+        axi_counter <= axi_counter + 1;
+        case (state_txn)
+          0:                    // accept new requests
+            begin
+               if (axi_awready)
+                 state_txn <= 1;
+               if (axi_arready)
+                 state_txn <= 5;
+            end
+          1:             // write; wait for data
+            begin
+               if (S_AXI_WVALID)
+                 begin
+                    txn.address <= axi_awaddr;
+                    txn.data <= S_AXI_WDATA;
+                    txn.write_enable <= 1;
+                    txn.wstrb <= S_AXI_WSTRB;
+                    mywr_en <= 1;
+                    state_txn <= 2;
+                 end
+            end
+          2:                    // enqueue cur request
+            begin
+               // wait for fifo to change to nonempty as an ack
+               if (!spi_fifo_empty)
+                 begin
+                    mywr_en <= 0;
+                    state_txn <= 3;
+                 end
+            end
+          3:                    // wait for request to finish (serialized)
+            begin
+               if (spi_fifo_empty)
+                 state_txn <= 4;
+            end
+          4:
+            begin
+               if (axi_wready)
+                 begin
+                    if (axi_awlen_cntr < axi_awlen && !S_AXI_WLAST)
+                      state_txn <= 1; // continue burst
+                    else
+                      state_txn <= 0;
+                 end
+            end
+
+          5:                    // read; enqueue request
+            begin
+               txn.address <= axi_araddr;
+               txn.data <= 0;
+               txn.write_enable <= 0;
+               txn.wstrb <= 0;
+               mywr_en <= 1;
+               state_txn <= 6;
+            end
+          6:                    // enqueue cur request
+            begin
+               // wait for fifo to change to nonempty as an ack
+               if (!spi_fifo_empty)
+                 begin
+                    mywr_en <= 0;
+                    state_txn <= 7;
+                 end
+            end
+          7:                    // wait for request to finish (serialized)
+            begin
+               if (spi_fifo_empty)
+                 state_txn <= 8;
+            end
+          8:                    // sync with rvalid
+            begin
+               if (axi_rvalid)
+                 begin
+                    if (axi_arlen_cntr < axi_arlen)
+                      state_txn <= 5; // continue burst
+                    else
+                      state_txn <= 0;
+                 end
+            end
+        endcase
+     end // always @ (posedge S_AXI_ACLK)
+
 
 	// implement Block RAM(s)
    wire mem_rden;
@@ -659,11 +721,11 @@ module spiram_slave_full_v1_0_S00_AXI #
 
    assign mem_rden = axi_arv_arr_flag ; //& ~axi_rvalid
 
-   assign mem_address = (axi_arv_arr_flag? axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]:(axi_awv_awr_flag? axi_awaddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]:0));
-
-   /* Latch all read or write parameters. We may need to wait for
-    memory to be ready and meanwhile incoming axi requests could
-    overwrite the parameters.  */
+   assign mem_address = (axi_arv_arr_flag
+                         ? axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]
+                         : (axi_awv_awr_flag
+                            ? axi_awaddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]
+                            :0));
 
    // AXI_DATA_WIDTH is 32, so mem_byte_index goes from [0..3]
    for (mem_byte_index = 0; mem_byte_index < C_S_AXI_DATA_WIDTH/8; mem_byte_index = mem_byte_index+1)
