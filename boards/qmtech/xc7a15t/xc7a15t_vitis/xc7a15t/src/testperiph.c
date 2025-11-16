@@ -202,8 +202,9 @@ void dump_spi_core_regs() {
 	     x, (x >> 10) & 1, (x >> 9) & 1, (x >> 8) & 1, (x >> 7) & 1, (x >> 6) & 1,  (x >> 5) & 1,
 	     (x >> 4) & 1,  (x >> 3) & 1,  (x >> 2) & 1,  (x >> 1) & 1, x & 1);
   vt100_at(4, 1);
-  xil_printf("SPISSR=0x%x TXFIFO=%d RXFIFO=%d IPISR=0x%x IPIER=0x%x\r",
-	     *spissr, *txfifo, *rxfifo, *ipisr, *ipier);
+  uint32_t *status_p = (uint32_t *)0xfff0;
+  xil_printf("SPISSR=0x%x TXFIFO=%d RXFIFO=%d IPISR=0x%x IPIER=0x%x STATUS=0x%x 0x%x 0x%x\r",
+	     *spissr, *txfifo, *rxfifo, *ipisr, *ipier, status_p[0], status_p[1], status_p[2] );
 
   for (int i = 0; i < 3000000; i++)  // make output viewable
     ;

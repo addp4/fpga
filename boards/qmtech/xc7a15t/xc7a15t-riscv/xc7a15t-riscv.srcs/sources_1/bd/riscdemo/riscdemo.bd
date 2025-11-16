@@ -328,13 +328,13 @@
             "value": "true"
           },
           "CLKOUT3_JITTER": {
-            "value": "172.249"
+            "value": "142.107"
           },
           "CLKOUT3_PHASE_ERROR": {
             "value": "164.985"
           },
           "CLKOUT3_REQUESTED_OUT_FREQ": {
-            "value": "80"
+            "value": "200"
           },
           "CLKOUT3_USED": {
             "value": "true"
@@ -355,7 +355,7 @@
             "value": "4"
           },
           "MMCM_CLKOUT2_DIVIDE": {
-            "value": "13"
+            "value": "5"
           },
           "NUM_OUT_CLKS": {
             "value": "3"
@@ -1029,7 +1029,7 @@
       },
       "spiram_0": {
         "vlnv": "user.org:user:spiram:1.0",
-        "ip_revision": "15",
+        "ip_revision": "21",
         "xci_name": "riscdemo_spiram_0_0",
         "xci_path": "ip/riscdemo_spiram_0_0/riscdemo_spiram_0_0.xci",
         "inst_hier_path": "spiram_0"
@@ -1043,6 +1043,12 @@
         "parameters": {
           "C_ENABLE_PROFILE": {
             "value": "1"
+          },
+          "C_NUM_MONITOR_SLOTS": {
+            "value": "2"
+          },
+          "C_SLOT_1_AXI_PROTOCOL": {
+            "value": "AXI4LITE"
           }
         }
       }
@@ -1076,7 +1082,8 @@
       "axi_smc_1_M01_AXI": {
         "interface_ports": [
           "axi_smc_1/M01_AXI",
-          "axi_quad_spi_0/AXI_LITE"
+          "axi_quad_spi_0/AXI_LITE",
+          "axi_perf_mon_0/SLOT_1_AXI4LITE"
         ]
       },
       "axi_smc_1_M02_AXI": {
@@ -1176,6 +1183,7 @@
           "axi_perf_mon_0/core_aclk",
           "axi_perf_mon_0/s_axi_aclk",
           "axi_perf_mon_0/slot_0_axi_aclk",
+          "axi_perf_mon_0/slot_1_axi_aclk",
           "spiram_0/s00_axi_aclk"
         ]
       },
@@ -1206,6 +1214,7 @@
           "axi_perf_mon_0/core_aresetn",
           "axi_perf_mon_0/s_axi_aresetn",
           "axi_perf_mon_0/slot_0_axi_aresetn",
+          "axi_perf_mon_0/slot_1_axi_aresetn",
           "spiram_0/s00_axi_aresetn"
         ]
       }
@@ -1263,7 +1272,7 @@
       "file": {
         "name": "../../../../../xc7a15t_vitis/xc7a15t/Debug/xc7a15t.elf",
         "type": "ELF",
-        "checksum": "734346442",
+        "checksum": "3775898568",
         "IsVisible": "1",
         "ScopedToRef": "riscdemo",
         "ScopedToCell": [

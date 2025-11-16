@@ -4,9 +4,7 @@ import axi_vip_pkg::*;
 import design_1_axi_vip_0_0_pkg::*;
 
 
-module spiram_tb(
-
-                 );
+module spiram_tb();
    
    bit clock;
    bit reset_n = 0;
@@ -34,17 +32,15 @@ module spiram_tb(
       // Step 5 - Start the agent
       master_agent.start_master();
 
-      #10
-      reset_n = 1;
+      #10 reset_n = 1;
+      #10 ;
       
-      #10
-        
-        // write first. then read back from same address.
-         
-        // write test
-        
+      // write first. then read back from same address.
+      
+      // write test
+      
       wr_txn = master_agent.wr_driver.create_transaction("write transaction");
-      wr_txn.set_write_cmd(32'h200,		   // addr
+      wr_txn.set_write_cmd(32'h20,		   // addr
 			   XIL_AXI_BURST_TYPE_INCR, // burst type
 			   0,			   // id
                            3,			   // len
@@ -57,7 +53,7 @@ module spiram_tb(
       // read test
       
       rd_txn = master_agent.rd_driver.create_transaction("read transaction");
-      rd_txn.set_read_cmd(32'h200,		   // addr
+      rd_txn.set_read_cmd(32'h20,		   // addr
 			  XIL_AXI_BURST_TYPE_INCR, // burst type
 			  0,			   // id
                           3,			   // len

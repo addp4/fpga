@@ -2,6 +2,7 @@
 
 `include "/home/nomura/git/fpga/modules/woof_fifo/woof_fifo.sv"
 `include "/home/nomura/git/fpga/modules/woof_simple_spi/simple_spi.sv"
+`include "/home/nomura/git/fpga/boards/qmtech/xc7a15t/modules/fifo_ram/fifo_ram.sv"
 
 module spiram_slave_full_v1_0_S00_AXI #
 	(
@@ -214,15 +215,13 @@ module spiram_slave_full_v1_0_S00_AXI #
 	//----------------------------------------------
 	//-- Signals for user logic memory space example
 	//------------------------------------------------
-   wire [OPT_MEM_ADDR_BITS:0] mem_address;
-   reg [C_S_AXI_DATA_WIDTH-1:0]    mem_data_out;
-   localparam integer 		     SPI_FIFO_DELAY = 64;
+   // wire [OPT_MEM_ADDR_BITS:0] mem_address;
+   // reg [C_S_AXI_DATA_WIDTH-1:0] mem_data_out;
+   // localparam integer      SPI_FIFO_DELAY = 64;
    wire 			     spi_fifo_empty;
 
    reg [31:0]                        axi_counter = 0;
    reg [31:0]                        status_word = 0;
-   reg [31:0]                        status_word2 = 0;
-   reg [31:0]                        status_word3 = 0;
 
    typedef struct packed {
       logic        write_enable;
@@ -248,7 +247,6 @@ module spiram_slave_full_v1_0_S00_AXI #
    wire            myrd_empty;
    reg             mywr_en;
    wire            mywr_full;
-   reg [7:0]       myfifo_delay;
 
    assign mywr_data = txn;
    woof_fifo #( .WIDTH(TXN_WIDTH) ) fif
@@ -261,6 +259,20 @@ module spiram_slave_full_v1_0_S00_AXI #
       .rd_en(myrd_en),
       .rd_data(myrd_data),
       .rd_empty(myrd_empty)
+      );
+
+   wire [31:0]     mem_data_out;
+   wire            mydata_valid;
+
+   fifo_ram fram
+     (
+      .clock(S_AXI_ACLK),
+      .reset_n(S_AXI_ARESETN),
+      .rd_en_o(myrd_en),
+      .rd_data(myrd_data),
+      .rd_empty(myrd_empty),
+      .data_o(mem_data_out),
+      .data_valid_o(mydata_valid)
       );
 
 	genvar i;
@@ -699,59 +711,14 @@ module spiram_slave_full_v1_0_S00_AXI #
      end // always @ (posedge S_AXI_ACLK)
 
 
-	// implement Block RAM(s)
-   wire mem_rden;
-   wire mem_wren;
-
-   assign mem_wren = axi_wready && S_AXI_WVALID ;
-
-   assign mem_rden = axi_arv_arr_flag ; //& ~axi_rvalid
-
-   assign mem_address = (axi_arv_arr_flag
-                         ? axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]
-                         : (axi_awv_awr_flag
-                            ? axi_awaddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB]
-                            :0));
-
-   // AXI_DATA_WIDTH is 32, so mem_byte_index goes from [0..3]
-   for (mem_byte_index = 0; mem_byte_index < C_S_AXI_DATA_WIDTH/8; mem_byte_index = mem_byte_index+1)
-     begin:BYTE_BRAM_GEN
-	wire [8-1:0] data_in ;
-	wire [8-1:0] data_out;
-	reg [8-1:0]  byte_ram [0 : 16383];
-
-	//assigning 8 bit data
-	assign data_in  = S_AXI_WDATA[(mem_byte_index*8+7) -: 8];
-	assign data_out = byte_ram[mem_address];
-
-        always @( posedge S_AXI_ACLK )
-          begin
-	     if (mem_wren && S_AXI_WSTRB[mem_byte_index])
-               begin
-	          byte_ram[mem_address] <= data_in;
-               end
-          end
-   always @( posedge S_AXI_ACLK )
-     begin
-	if (mem_rden)
-	  begin
-	     mem_data_out[(mem_byte_index*8+7) -: 8] <= data_out;
-	  end
-     end
-end // block: BYTE_BRAM_GEN
-
    //Output register or memory read data
 
    always @( mem_data_out, axi_rvalid)
      begin
-        if (mem_wren && S_AXI_WSTRB != 4'b1111)
-          status_word3 <= axi_counter; // record last time of partial write
 	if (axi_rvalid)
 	  begin
              case (axi_araddr)
                16'hfff0: axi_rdata <= status_word;
-               16'hfff4: axi_rdata <= status_word2;
-               16'hfff8: axi_rdata <= status_word3;
                default: axi_rdata <= mem_data_out;
              endcase // case (axi_araddr)
 	  end
@@ -762,43 +729,6 @@ end // block: BYTE_BRAM_GEN
      end
 
    // Add user logic here
-
-/* The "user logic" for now is a simulated FIFO between the AXI bus
- interface and a to-be-written PSRAM memory controller. The FIFO
- implements a depth and a delay.
-
- In the AXI interface a new memory request should only be accepted if
- the FIFO is not full. This includes the next beat in a burst.
-  */
-
-   always @( posedge S_AXI_ACLK )
-     begin
-	if ( S_AXI_ARESETN == 1'b0 )
-	  begin
-             myfifo_delay <= 0;
-	  end
-	else
-	  begin
-           if (axi_wready && S_AXI_WVALID)
-             status_word2[S_AXI_WSTRB] <= 1;
-
-	     // simulate dequeue from fifo every SPI_FIFO_DELAY cycles
-
-             myrd_en <= 0;
-             if (!myrd_empty)
-               begin
-                  if (myfifo_delay == SPI_FIFO_DELAY)
-                    begin
-                       myrd_en <= 1; // assert fifo deq for 1 cycle
-                       myfifo_delay <= 0;
-                    end
-                  else
-                    myfifo_delay <= myfifo_delay + 1;
-               end
-             else
-               myfifo_delay <= 0;
-	  end // else: !if( S_AXI_ARESETN == 1'b0 )
-     end
 
 	// User logic ends
 
