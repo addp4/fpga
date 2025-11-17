@@ -1,9 +1,9 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-/* 
+/*
  One of these deals with a gazillion signals...
- 
+
  Only top-level can have tristate signals. We can't predict what the
  top level of the client application looks like, but we can provide a
  thin wrapper of simple_spi_wrapper's core.
@@ -40,9 +40,9 @@ module simple_spi_wrapper
    wire [7:0]      wr_data_i;
    wire [7:0]      rd_data_o;
    wire            busy_o;
-                   
+
    IOBUF spi_mosi_iobuf
-     (.I(spi_mosi_o),
+     (.I(spi_mosi_o),           // yes, o goes to i
       .IO(spi_mosi_io),
       .O(spi_mosi_i),
       .T(spi_mosi_t));
@@ -65,7 +65,7 @@ module simple_spi_wrapper
    simple_spi spi
      (
       .clock(clock),
-      .rst_n(rst_n),            
+      .rst_n(rst_n),
       .spi_csn(spi_csn),
       .rd_en_i(rd_en_i),
       .wr_en_i(wr_en_i),
@@ -85,7 +85,7 @@ module simple_spi_wrapper
       .spi_miso_o(spi_miso_o),
       .spi_miso_t(spi_miso_t)
       );
-   
+
 endmodule // simple_spi_wrapper
 
 module simple_spi
@@ -111,13 +111,14 @@ module simple_spi
    output wire       spi_miso_o,
    output wire       spi_miso_t
    );
-   
+
    wire              busy;
-   reg [7:0]         rd_data;
-   reg [7:0]         wr_data;
-   reg               spi_sck;
-   reg [5:0]         shift_count;
-   reg               start;
+   reg [7:0]         rd_data = 0;
+   reg [7:0]         wr_data = 0;
+   reg [7:0]         wr_data_latch;
+   reg               spi_sck = 0;
+   reg [5:0]         shift_count = 0;
+   reg               start = 0;
 
    assign spi_miso_t = 1;  // miso in input mode
 
@@ -131,22 +132,22 @@ module simple_spi
    assign spi_sck_t = 0;  // sck in output mode
    assign spi_sck_o = spi_sck;
 
-   assign busy = start | (shift_count > 0);
+   assign busy = start || (shift_count > 0);
    assign busy_o = busy;
 
    assign rd_data_o = rd_data;
-   
+
    always @(posedge clock)
      begin
         start <= 0;
         if (wr_en_i && !busy)
           begin
-             wr_data <= wr_data_i; // latch data to be sent
+             wr_data_latch <= wr_data_i; // latch as soon as the enable rises
              start <= 1;
           end
         else if (rd_en_i && !busy)
           begin
-             wr_data <= 0;
+             wr_data_latch <= 0;
              start <= 1;
           end
      end // always @ (posedge clock)
@@ -159,7 +160,10 @@ module simple_spi
              shift_count <= 0;
           end
         if (start)
-          shift_count <= 16;
+          begin
+             shift_count <= 16;
+             wr_data <= wr_data_latch;
+          end
         if (shift_count != 0)
           begin
              if ((shift_count & 1) == 0)
@@ -176,5 +180,5 @@ module simple_spi
                end // else: !if((shift_count & 1) == 0)
           end
      end // always @ (posedge clock)
-   
+
 endmodule

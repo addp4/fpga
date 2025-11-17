@@ -1,7 +1,6 @@
 `timescale 1 ns / 1 ps
 
 `include "/home/nomura/git/fpga/modules/woof_fifo/woof_fifo.sv"
-`include "/home/nomura/git/fpga/modules/woof_simple_spi/simple_spi.sv"
 `include "/home/nomura/git/fpga/boards/qmtech/xc7a15t/modules/fifo_ram/fifo_ram.sv"
 
 module spiram_slave_full_v1_0_S00_AXI #
@@ -275,9 +274,6 @@ module spiram_slave_full_v1_0_S00_AXI #
       .data_valid_o(mydata_valid)
       );
 
-	genvar i;
-	genvar j;
-	genvar mem_byte_index;
 
 	// I/O Connections assignments
 

@@ -5,7 +5,7 @@ typedef struct packed {
    logic       write_enable;
    logic [3:0] wstrb;
    logic [31:0] data;
-   logic [15:0] address;
+   logic [23:0] address;
 } transaction_t;
 localparam integer TXN_WIDTH = $bits(transaction_t);
 
@@ -21,16 +21,13 @@ module fifo_ram
    output wire        data_valid_o
    );
 
-   genvar             mem_byte_index;
-   wire               mem_wren;
-   wire               mem_rden;
-   wire [13:0]        mem_address;
-   reg [31:0]         data;
    reg                data_valid = 0;
    localparam integer SPI_FIFO_DELAY = 64;
    reg [7:0]          fifo_delay;
    reg                rd_en;
+
    assign rd_en_o = rd_en;
+   assign data_valid_o = data_valid;
 
    always @(posedge clock)
      begin
@@ -54,6 +51,15 @@ module fifo_ram
              fifo_delay <= 0;
           end
      end
+
+   //
+   // ============ bram ===============
+   //
+   reg [31:0]         data;
+   wire               mem_wren;
+   wire               mem_rden;
+   wire [13:0]        mem_address;
+   genvar             mem_byte_index;
 
    assign data_o = data;
    assign data_valid_o = data_valid;
