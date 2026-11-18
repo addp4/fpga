@@ -43,12 +43,22 @@ edge_real:
 # Two steps so OPT_FAST really takes effect.
 VFD_V := top.v vfd_16sd13gink.v
 
+vfd_train:
+	verilator --cc --exe -j 3 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) sim_vfd.cpp -CFLAGS -DNO_PI
+	make -C obj_dir -f Vtop.mk -j OPT_FAST="-O3 --profile-generate" OPT_GLOBAL="-O3 --profile-generate" LDFLAGS="-fprofile-generate"
+	./obj_dir/Vtop 0 30000000
+	rm -f obj_dir/*.o obj_dir/Vtop obj_dir/*.a
+	make -C obj_dir -f Vtop.mk -j OPT_FAST="-O3 --profile-use" OPT_GLOBAL="-O3 --profile-use"
+
 vfd_fake:
-	verilator --cc --exe -j 0 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) sim_vfd.cpp -CFLAGS -DNO_PI
+	verilator --cc --exe -j 3 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) sim_vfd.cpp -CFLAGS -DNO_PI
 	make -C obj_dir -f Vtop.mk -j OPT_FAST="-O3 -march=native" OPT_GLOBAL="-O3 -march=native"
 	./obj_dir/Vtop 0 100000000
 
 vfd_real:
-	verilator --cc --exe -j 0 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) sim_vfd.cpp -LDFLAGS -llgpio
+	verilator --cc --exe -j 3 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) sim_vfd.cpp -LDFLAGS -llgpio
 	make -C obj_dir -f Vtop.mk -j OPT_FAST="-O3 -march=native" OPT_GLOBAL="-O3 -march=native"
 	./obj_dir/Vtop 0
+
+clean:
+	rm -rf obj_dir
