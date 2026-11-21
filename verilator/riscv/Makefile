@@ -10,9 +10,9 @@ default:	cpu
 VFD_V := cpu.sv
 
 cpu:
-	$(VERILATOR) --cc --exe -j 6 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) cpu.cpp -CFLAGS -DNO_PI
+	$(VERILATOR) --cc --exe -j 6 -O3 --x-assign fast --x-initial fast --noassert $(VFD_V) cpu.cpp -CFLAGS -DENABLE_DEBUG_PRINT=1
 	make -C obj_dir -f Vcpu.mk -j OPT_FAST="-O3 -march=native" OPT_GLOBAL="-O3 -march=native" CXX="$(CXX)" LINK="$(CXX)" LDFLAGS="-static"
-	time ./obj_dir/Vcpu 0 10000000
+	time ./obj_dir/Vcpu 0 1000
 
 run:
 	mscp ./obj_dir/Vcpu root@$(HOST):/data/Vcpu

@@ -1,13 +1,19 @@
 `timescale 1ns / 1ns
 
-`ifdef ENABLE_DEBUG_PRINT
-    `define LOG(msg) $display msg
-`else
-    `define LOG(msg)
-`endif
+// `define LOG(msg) $display msg
+`define LOG(msg)
 
 typedef union packed {
    bit [31:0] raw;
+
+   struct packed {
+      bit[6:0] _7;
+      bit [4:0] rs2;
+      bit [4:0] rs1;
+      bit [2:0] funct3;
+      bit [4:0] rd;
+      bit [6:0] opcode;
+   } any_type;
 
    struct packed {
       bit[6:0] funct7;
@@ -105,6 +111,12 @@ typedef enum [5:0]
     EBREAK_INST
 } asm_t;
 
+typedef struct {       // store to load forwarding
+   logic valid;
+   logic [4:0] rd;     // register num
+   logic [31:0] rval;  // register value
+} stlf_t;
+
 typedef struct {
    logic [31:0] pc;
 } if_id_t;
@@ -121,6 +133,11 @@ typedef struct {
 typedef struct {
    logic rd_valid;
    logic rd_mem_signed;
+   logic is_branch;
+   logic is_call;
+   logic is_load;
+   logic is_store;
+   logic is_alu;
    logic [2:0] rd_mem_bytes;
    logic [4:0] rd_mem_shift;
    logic [4:0] rd;
@@ -142,6 +159,7 @@ typedef struct {
 
 typedef struct {
    logic invalid;
+   stlf_t stlf;
 } wb_ex_t;
 
 typedef struct {
@@ -149,7 +167,15 @@ typedef struct {
 } regfile_t;
 
 typedef struct {
+   logic [31:0] cycles;
    logic [31:0] inst_retired;
+   logic [31:0] reg_forwards;
+   logic [31:0] br_retired;
+   logic [31:0] alu_retired;
+   logic [31:0] call_retired;
+   logic [31:0] load_retired;
+   logic [31:0] store_retired;
+   logic [31:0] br_taken;
 } pmu_t;
 
 
@@ -379,7 +405,7 @@ module IF2(input [31:0] rdata,
                               id_ex.inst.raw[20], // bit 11
                               id_ex.inst.raw[30:21]  // bits 10:1
                               };
-        default: `LOG(("bad type"));
+        default: `LOG(("bad type, pc=0x%0x opcode=0x%0x", if_id.pc, rdata[6:0]));
       endcase // case (id_ex.fmt)
 
       /* verilator lint_off CASEINCOMPLETE */
@@ -427,17 +453,30 @@ endmodule // Decode
 module EX(input         clk,
           input         id_ex_t id_ex,
           input         regfile_t regs,
+          output        pmu_t pmu,
           output        ex_wb_t ex_wb,
           output        wb_ex_t wb_ex,
           output [31:0] raddr
 );
    inst_t i;
    assign i = id_ex.inst;
+   // calculate rs1 and rs2 register values with stlf bypass. we read the ex_wb we
+   // wrote in the previous cycle. it works if reg writeback is 1 stage away,
+   // else it should be sent back in each xx_ex and read in increasing distance order
+   wire [31:0] gpr_rs1;
+   wire        gpr_rs1_forward;
+   assign gpr_rs1_forward = ex_wb.rd_valid && ex_wb.rd == i.any_type.rs1 && ex_wb.rd != 0;
+   assign gpr_rs1 = gpr_rs1_forward ? ex_wb.rval : regs.gpr[i.any_type.rs1];
+   logic [31:0] gpr_rs2;
+   wire         gpr_rs2_forward;
+   assign gpr_rs2_forward = ex_wb.rd_valid && ex_wb.rd == i.any_type.rs2 && ex_wb.rd != 0;
+   assign gpr_rs2 = gpr_rs2_forward ? ex_wb.rval : regs.gpr[i.any_type.rs2];
+   // address generation for loads
    wire [31:0] rs1_plus_imm;
-   assign rs1_plus_imm = regs.gpr[i.i_type.rs1] + id_ex.imm;
+   assign rs1_plus_imm = gpr_rs1 + id_ex.imm;
 
    always @(posedge clk) begin
-      `LOG(("EX ] pc=0x%0x", id_ex.pc));
+      `LOG(("EX ] pc=0x%0x rs1_forward=%0d rs2_forward=%0d", id_ex.pc, gpr_rs1_forward, gpr_rs2_forward));
 
       ex_wb.new_pc_valid <= 0;
       ex_wb.rd_valid <= 0;
@@ -445,110 +484,138 @@ module EX(input         clk,
       ex_wb.rd_mem_signed <= 0;
       ex_wb.rval <= 0;
       ex_wb.pc <= id_ex.pc;
+      ex_wb.is_branch <= 0;
+      ex_wb.is_call <= 0;
+      ex_wb.is_load <= 0;
+      ex_wb.is_store <= 0;
+      ex_wb.is_alu <= 0;
       ex_wb.invalid <= wb_ex.invalid;
+
+      if ((gpr_rs1_forward || gpr_rs2_forward) && !wb_ex.invalid)
+        pmu.reg_forwards <= pmu.reg_forwards + 1;
 
       case (id_ex.asm_op)
         // R-type
 
         ADD_INST: begin
-           `LOG(("EX ] eval r%0d <- r%0d + r%0d = %0d", i.r_type.rd, i.r_type.rs1, i.r_type.rs2, regs.gpr[i.r_type.rs1] + regs.gpr[i.r_type.rs2]));
+           `LOG(("EX ] eval r%0d <- r%0d + r%0d = %0d", i.r_type.rd, i.r_type.rs1, i.r_type.rs2, gpr_rs1 + gpr_rs1));
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] + regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 + gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         SUB_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] - regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 - gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         XOR_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] ^ regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 ^ gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         OR_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] | regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 | gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         AND_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] & regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 & gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         SLL_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] << regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 << gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         SRL_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] >> regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= gpr_rs1 >> gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         SRA_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= $signed(regs.gpr[i.r_type.rs1]) >>> regs.gpr[i.r_type.rs2];
+           ex_wb.rval <= $signed(gpr_rs1) >>> gpr_rs2;
+           ex_wb.is_alu <= 1;
         end
         SLT_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= $signed(regs.gpr[i.r_type.rs1]) < $signed(regs.gpr[i.r_type.rs2]) ? 1 : 0;
+           ex_wb.rval <= $signed(gpr_rs1) < $signed(gpr_rs2) ? 1 : 0;
+           ex_wb.is_alu <= 1;
         end
         SLTU_INST: begin
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.r_type.rs1] < regs.gpr[i.r_type.rs2] ? 1 : 0;
+           ex_wb.rval <= gpr_rs1 < gpr_rs2 ? 1 : 0;
+           ex_wb.is_alu <= 1;
         end
 
         // I-type
 
         ADDI_INST: begin
-           `LOG(("EX ] eval r%0d <- r%0d + %0d = %0d", i.r_type.rd, i.r_type.rs1, id_ex.imm, rs1_plus_imm));
+           `LOG(("EX ] eval r%0d <- r%0d + %0d = %0d", i.i_type.rd, i.i_type.rs1, id_ex.imm, rs1_plus_imm));
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
+           ex_wb.rd <= i.i_type.rd;
            ex_wb.rval <= rs1_plus_imm;
+           ex_wb.is_alu <= 1;
         end
         XORI_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.i_type.rs1] ^ id_ex.imm;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= gpr_rs1 ^ id_ex.imm;
+           ex_wb.is_alu <= 1;
         end
         ORI_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.i_type.rs1] | id_ex.imm;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= gpr_rs1 | id_ex.imm;
+           ex_wb.is_alu <= 1;
         end
         ANDI_INST: begin
+           `LOG(("ANDI 0x%0x & 0x%0x = 0x%0x", gpr_rs1, id_ex.imm, gpr_rs1 & id_ex.imm));
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.i_type.rs1] & id_ex.imm;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= gpr_rs1 & id_ex.imm;
+           ex_wb.is_alu <= 1;
         end
         SLLI_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.i_type.rs1] << id_ex.imm;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= gpr_rs1 << id_ex.imm;
+           ex_wb.is_alu <= 1;
         end
         SRLI_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.i_type.rs1] >> id_ex.imm;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= gpr_rs1 >> id_ex.imm;
+           ex_wb.is_alu <= 1;
         end
         SRAI_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= $signed(regs.gpr[i.i_type.rs1]) >>> id_ex.imm;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= $signed(gpr_rs1) >>> id_ex.imm;
+           ex_wb.is_alu <= 1;
         end
         SLTI_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= $signed(regs.gpr[i.i_type.rs1]) < $signed(id_ex.imm) ? 1 : 0;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= $signed(gpr_rs1) < $signed(id_ex.imm) ? 1 : 0;
+           ex_wb.is_alu <= 1;
         end
         SLTIU_INST: begin
            ex_wb.rd_valid <= 1;
-           ex_wb.rd <= i.r_type.rd;
-           ex_wb.rval <= regs.gpr[i.i_type.rs1] < id_ex.imm ? 1 : 0;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.rval <= gpr_rs1 < id_ex.imm ? 1 : 0;
+           ex_wb.is_alu <= 1;
         end
 
         // Load (I-type)
@@ -558,7 +625,8 @@ module EX(input         clk,
            ex_wb.rd_mem_bytes <= 1;
            ex_wb.rd_mem_shift <= 2'((rs1_plus_imm) & 3) << 3;
            ex_wb.rd_mem_signed <= 1;
-           ex_wb.rd <= i.r_type.rd;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.is_load <= 1;
            raddr <= (rs1_plus_imm) & 32'hfffffffc;
         end
         LH_INST: begin
@@ -566,7 +634,8 @@ module EX(input         clk,
            ex_wb.rd_mem_bytes <= 2;
            ex_wb.rd_mem_shift <= 2'((rs1_plus_imm) & 3) << 3;
            ex_wb.rd_mem_signed <= 1;
-           ex_wb.rd <= i.r_type.rd;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.is_load <= 1;
            raddr <= rs1_plus_imm;
         end
         LW_INST: begin
@@ -574,7 +643,8 @@ module EX(input         clk,
            ex_wb.rd_mem_bytes <= 4;
            ex_wb.rd_mem_shift <= 2'((rs1_plus_imm) & 3) << 3;
            ex_wb.rd_mem_signed <= 0;
-           ex_wb.rd <= i.r_type.rd;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.is_load <= 1;
            raddr <= rs1_plus_imm;
         end
         LBU_INST: begin
@@ -582,7 +652,8 @@ module EX(input         clk,
            ex_wb.rd_mem_bytes <= 1;
            ex_wb.rd_mem_shift <= 2'((rs1_plus_imm) & 3) << 3;
            ex_wb.rd_mem_signed <= 0;
-           ex_wb.rd <= i.r_type.rd;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.is_load <= 1;
            raddr <= rs1_plus_imm;
         end
         LHU_INST: begin
@@ -590,90 +661,102 @@ module EX(input         clk,
            ex_wb.rd_mem_bytes <= 2;
            ex_wb.rd_mem_shift <= 2'((rs1_plus_imm) & 3) << 3;
            ex_wb.rd_mem_signed <= 0;
-           ex_wb.rd <= i.r_type.rd;
+           ex_wb.rd <= i.i_type.rd;
+           ex_wb.is_load <= 1;
            raddr <= rs1_plus_imm;
         end
 
         // Store (S-type)
 
         SB_INST: begin
+           ex_wb.is_store <= 1;
         end
         SH_INST: begin
+           ex_wb.is_store <= 1;
         end
         SW_INST: begin
+           ex_wb.is_store <= 1;
         end
 
         // Branch
 
         BEQ_INST: begin
-           if (regs.gpr[i.b_type.rs1] == regs.gpr[i.b_type.rs2]) begin
+           if (gpr_rs1 == gpr_rs2) begin
               `LOG(("EX ] eval  beq r%0d == r%0d, pc <- 0x%0x + %0d = 0x%0x",
                        i.b_type.rs1, i.b_type.rs2, id_ex.pc, id_ex.imm << 1,
                        id_ex.pc + (id_ex.imm << 1)));
               ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
               ex_wb.new_pc_valid <= 1;
            end
+           ex_wb.is_branch <= 1;
         end
         BNE_INST: begin
-           if (regs.gpr[i.b_type.rs1] != regs.gpr[i.b_type.rs2]) begin
+           if (gpr_rs1 != gpr_rs2) begin
               `LOG(("EX ] eval  bne r%0d < r%0d, pc <- 0x%0x + %0d = 0x%0x",
                        i.b_type.rs1, i.b_type.rs2, id_ex.pc, id_ex.imm << 1,
                        id_ex.pc + (id_ex.imm << 1)));
               ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
               ex_wb.new_pc_valid <= 1;
            end
+           ex_wb.is_branch <= 1;
         end
         BLT_INST: begin
               `LOG(("EX ] eval  blt r%0d < r%0d, pc <- 0x%0x + %0d = 0x%0x",
                        i.b_type.rs1, i.b_type.rs2, id_ex.pc, id_ex.imm << 1,
                        id_ex.pc + (id_ex.imm << 1)));
-           if ($signed(regs.gpr[i.b_type.rs1]) < $signed(regs.gpr[i.b_type.rs2])) begin
+           if ($signed(gpr_rs1) < $signed(gpr_rs2)) begin
               ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
               ex_wb.new_pc_valid <= 1;
            end
+           ex_wb.is_branch <= 1;
         end
         BGE_INST: begin
-           if ($signed(regs.gpr[i.b_type.rs1]) >= $signed(regs.gpr[i.b_type.rs2])) begin
+           if ($signed(gpr_rs1) >= $signed(gpr_rs2)) begin
               `LOG(("EX ] eval  bge r%0d < r%0d, pc <- 0x%0x + %0d = 0x%0x",
                        i.b_type.rs1, i.b_type.rs2, id_ex.pc, id_ex.imm << 1,
                        id_ex.pc + (id_ex.imm << 1)));
               ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
               ex_wb.new_pc_valid <= 1;
            end
+           ex_wb.is_branch <= 1;
         end
         BLTU_INST: begin
-           if (regs.gpr[i.b_type.rs1] < regs.gpr[i.b_type.rs2]) begin
+           if (gpr_rs1 < gpr_rs2) begin
               `LOG(("EX ] eval  bltu r%0d < r%0d, pc <- 0x%0x + %0d = 0x%0x",
                        i.b_type.rs1, i.b_type.rs2, id_ex.pc, id_ex.imm << 1,
                        id_ex.pc + (id_ex.imm << 1)));
               ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
               ex_wb.new_pc_valid <= 1;
            end
+           ex_wb.is_branch <= 1;
         end
         BGEU_INST: begin
-           if (regs.gpr[i.b_type.rs1] >= regs.gpr[i.b_type.rs2]) begin
+           if (gpr_rs1 >= gpr_rs2) begin
               `LOG(("EX ] eval  bgeu r%0d < r%0d, pc <- 0x%0x + %0d = 0x%0x",
                        i.b_type.rs1, i.b_type.rs2, id_ex.pc, id_ex.imm << 1,
                        id_ex.pc + (id_ex.imm << 1)));
               ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
               ex_wb.new_pc_valid <= 1;
            end
+           ex_wb.is_branch <= 1;
         end
         JAL_INST: begin
-           `LOG(("jal"));
+           `LOG(("jal rd=%0d", i.j_type.rd));
            ex_wb.new_pc <= id_ex.pc + (id_ex.imm << 1);
            ex_wb.new_pc_valid <= 1;
            ex_wb.rd <= i.j_type.rd;
            ex_wb.rd_valid <= 1;
            ex_wb.rval <= id_ex.pc + 4;
+           ex_wb.is_call <= 1;
         end
         JALR_INST: begin
            `LOG(("jalr"));
-           ex_wb.new_pc <= regs.gpr[i.i_type.rs1] + (id_ex.imm << 1);
+           ex_wb.new_pc <= gpr_rs1 + (id_ex.imm << 1);
            ex_wb.new_pc_valid <= 1;
            ex_wb.rd <= i.i_type.rd;
            ex_wb.rd_valid <= 1;
            ex_wb.rval <= id_ex.pc + 4;
+           ex_wb.is_call <= 1;
         end
         LUI_INST: begin
            `LOG(("lui"));
@@ -727,17 +810,24 @@ module WB(input         clk,
          pmu.inst_retired <= pmu.inst_retired + 1;
 
          if (ex_wb.new_pc_valid) begin
-            `LOG(("WB ] commit pc <- 0x%0x", ex_wb.new_pc));
+            `LOG(("WB ] commit pc <- 0x%0x and flush pipe", ex_wb.new_pc));
             wb_if.new_pc_valid <= 1;
             wb_if.new_pc <= ex_wb.new_pc;
             wb_id.invalid <= 1;
             wb_ex.invalid <= 1;
+            pmu.br_taken <= pmu.br_taken + 1;
          end
+
+         if (ex_wb.is_alu) pmu.alu_retired <= pmu.alu_retired + 1;
+         if (ex_wb.is_call) pmu.call_retired <= pmu.call_retired + 1;
+         if (ex_wb.is_branch) pmu.br_retired <= pmu.br_retired + 1;
+         if (ex_wb.is_load) pmu.load_retired <= pmu.load_retired + 1;
+         if (ex_wb.is_store) pmu.store_retired <= pmu.store_retired + 1;
 
          if (ex_wb.rd_valid && ex_wb.rd != 0) begin
             case (ex_wb.rd_mem_bytes)
               0: begin
-                 `LOG(("WB ] commit r%d <- %0d", ex_wb.rd, ex_wb.rval));
+                 `LOG(("WB ] commit r%d <- 0x%0x", ex_wb.rd, ex_wb.rval));
                  regs.gpr[ex_wb.rd] <= ex_wb.rval;
               end
               1: begin
@@ -777,21 +867,26 @@ module WB(input         clk,
                   ex_wb.rd_valid, ex_wb.rd, ex_wb.rval));
       end
    end
-
 endmodule // WB
 
 
 module CPU(input         clk,
            output [31:0] r10,
            output [31:0] cycle_cnt,
-           output [31:0] inst_retired
+           output [31:0] inst_retired,
+           output [31:0] br_taken,
+           output [31:0] br_retired,
+           output [31:0] call_retired,
+           output [31:0] alu_retired,
+           output [31:0] load_retired,
+           output [31:0] store_retired,
+           output [31:0] reg_forwards
 );
    logic [31:0] new_pc;
    logic [31:0] mem_raddr_a = -1, mem_raddr_b;
    logic [31:0] mem_rdata_a, mem_rdata_b;
    logic [3:0]  mem_we;
    logic [31:0] mem_waddr, mem_wdata;
-   logic [31:0] cycles;
 
    ram_2r1w  mem(.clk(clk),
                  .we(mem_we),
@@ -820,20 +915,27 @@ module CPU(input         clk,
    IF1 fetch(.clk(clk), .raddr(mem_raddr_a), .if_id(if_id), .wb_if(wb_if));
    IF2 decode(.rdata(mem_rdata_a), .if_id(if_id), .id_ex(id_ex), .wb_id(wb_id));
    EX execute(.clk(clk), .id_ex(id_ex), .ex_wb(ex_wb), .wb_ex(wb_ex),
-              .regs(regs), .raddr(mem_raddr_b)
+              .regs(regs), .raddr(mem_raddr_b), .pmu(pmu)
               );
    WB wback(.clk(clk), .ex_wb(ex_wb), .wb_id(wb_id), .wb_if(wb_if), .wb_ex(wb_ex),
             .regs(regs), .rdata(mem_rdata_b),
             .waddr(mem_waddr), .wdata(mem_wdata),
             .pmu(pmu));
 
-   assign cycle_cnt = cycles;
+   assign cycle_cnt = pmu.cycles;
    assign inst_retired = pmu.inst_retired;
+   assign br_taken = pmu.br_taken;
+   assign br_retired = pmu.br_retired;
+   assign call_retired = pmu.call_retired;
+   assign alu_retired = pmu.alu_retired;
+   assign load_retired = pmu.load_retired;
+   assign store_retired = pmu.store_retired;
+   assign reg_forwards = pmu.reg_forwards;
    assign r10 = regs.gpr[10];
 
    always @(posedge clk)
      begin
-        `LOG(("==================== cycle %d", cycles));
-        cycles <= cycles + 1;
+        `LOG(("==================== cycle %d", pmu.cycles));
+        pmu.cycles <= pmu.cycles + 1;
      end
 endmodule

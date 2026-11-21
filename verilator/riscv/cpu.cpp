@@ -27,6 +27,13 @@ int main(int argc, char** argv) {
   printf("cycle_cnt = %d\n", top.cycle_cnt);
   printf("inst_retired = %d\n", top.inst_retired);
   printf("IPC = %.2f\n", 1.0 * top.inst_retired / top.cycle_cnt);
+  printf("br_retired = %d\n", top.br_retired);
+  printf("br_taken = %d\n", top.br_taken);
+  printf("call_retired = %d\n", top.call_retired);
+  printf("load_retired = %d\n", top.load_retired);
+  printf("store_retired = %d\n", top.store_retired);
+  printf("alu_retired = %d\n", top.alu_retired);
+  printf("reg_forwards = %d\n", top.reg_forwards);
 
 #if 0
   top.clk = 0; top.rst_n = 1; top.eval();
