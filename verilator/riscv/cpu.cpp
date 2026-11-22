@@ -19,10 +19,13 @@ int main(int argc, char** argv) {
   int chip = argc > 1 ? atoi(argv[1]) : 0;
   uint64_t max_cycles = argc > 2 ? strtoull(argv[2], nullptr, 0) : 0;
   Vcpu top;
-  for (int i = 0; i < max_cycles * 2; i++) {
+  auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < max_cycles * 2+1; i++) {
     top.clk = !top.clk;
     top.eval();
   }
+  double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+
   printf("r10 = %d\n", top.r10);
   printf("cycle_cnt = %d\n", top.cycle_cnt);
   printf("inst_retired = %d\n", top.inst_retired);
@@ -34,6 +37,8 @@ int main(int argc, char** argv) {
   printf("store_retired = %d\n", top.store_retired);
   printf("alu_retired = %d\n", top.alu_retired);
   printf("reg_forwards = %d\n", top.reg_forwards);
+  printf("wall time = %.2f\n", elapsed);
+  printf("cycles/sec = %.0f\n", top.cycle_cnt / elapsed);
 
 #if 0
   top.clk = 0; top.rst_n = 1; top.eval();

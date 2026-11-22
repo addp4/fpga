@@ -20,16 +20,16 @@ int main() {
   asm volatile("addi a0, a0, 1");
   asm volatile("addi a0, a0, 1");
   asm volatile("addi a0, a0, 1");
-  asm volatile("addi a0, a0, 1");
+
   int sum = 0;
-  for (int i = 0; i < 100000; i += 1) {
+  for (int i = 0; i < 100; i += 1) {
     sum += i;
     asm volatile("" : "+r"(i));
   }
   return sum;
 }
 
-#elif 0
+#elif 1
 
 // busybeaver without memory, tape is in a register
 // A0	A1	B0	B1	C0	C1	D0	D1	sigma(M)	s(M)
