@@ -1,13 +1,14 @@
-CXX = clang++
+CXX = g++  #  clang++-22
 ARMCC = /usr/local/google/home/nomurak/bin/aarch64-unknown-linux-gnu-g++ -fno-tree-slp-vectorize
 # ARMCC = /usr/local/google/home/nomurak/bin/aarch64-ctng-clang++
 # VERILATOR = /opt/verilator-4.038/bin/verilator
-# VERILATOR = verilator --no-std-package
-VERILATOR = ~/verilator-src/bin/verilator
+# VERILATOR = verilator
+# VERILATOR = ~/verilator-src/bin/verilator
+VERILATOR = ~/verilator-4038/bin/verilator
 
 default:	cpu
 
-VFD_V := cpu.sv
+VFD_V := cpu.sv vfd_16sd13gink.v
 
 # Synthesis-hygiene lint: enable all warnings, but keep them non-fatal and mute the
 # cosmetic classes (UNUSED/UNDRIVEN fire constantly on partially-used packed structs).
@@ -27,3 +28,7 @@ full:	cpu
 
 clean:
 	rm -rf obj_dir
+
+# Run until Ctrl-C, sending the VFD output over /dev/spidev0.0 (see cpu.cpp for wiring).
+display:	cpu
+	./obj_dir/Vcpu 0 0

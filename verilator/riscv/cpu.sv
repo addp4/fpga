@@ -126,21 +126,24 @@ typedef struct packed {
 
 typedef struct packed {
    logic rd_valid;
-   logic pmu_is_branch;
-   logic pmu_is_call;
-   logic pmu_is_load;
-   logic pmu_is_store;
-   logic pmu_is_alu;
-   logic new_pc_valid;
    logic invalid;
    logic [4:0] rd;
    logic [31:0] rval;
    logic        rd_mem;
    logic [31:0] new_pc;
    logic [31:0] pc;
+   logic [31:0] rd_mem_addr;
+   logic [2:0]  rd_mem_len;
+   logic	rd_mem_signed;
    logic [2:0]  wr_mem_len;
    logic [31:0] wr_mem_addr;
    logic [31:0] wr_mem_data;
+   logic pmu_is_branch;
+   logic pmu_is_br_indirect;
+   logic pmu_is_load;
+   logic pmu_is_store;
+   logic pmu_is_alu;
+   logic new_pc_valid;
 } ex_wb_t;
 
 typedef struct packed {
@@ -164,12 +167,14 @@ typedef struct packed {
    logic [31:0] alu_retired;
    logic [31:0] br_retired;
    logic [31:0] br_taken;
-   logic [31:0] call_retired;
-   logic [31:0] cycles;
+   logic [31:0] br_indirect_retired;
+   logic [63:0] cycles;
    logic [31:0] inst_retired;
    logic [31:0] load_retired;
    logic [31:0] reg_forwards;
    logic [31:0] store_retired;
+   logic [63:0] user;
+   logic [31:0]	user2;
 } pmu_t;
 
 
@@ -227,8 +232,8 @@ module ram_2r1w #(
 
    // Option 1: Synchronous Reads (1-cycle latency, maps cleanly to FPGA BRAM/M20K)
    always_ff @(posedge clk) begin
-      `LOG(("RAM] raddr_a=0x%0x (byte 0x%0x) raddr_b=0x%0x (byte 0x%0x) we=0x%0x waddr=0x%0x (byte 0x%0x)",
-            raddr_a, raddr_a << 2, raddr_b, raddr_b << 2, we, waddr, waddr << 2));
+      `LOG(("RAM] raddr_a=0x%0x (byte 0x%0x) raddr_b=0x%0x (byte 0x%0x) we=0x%0x waddr=0x%0x (byte 0x%0x) rdata_a=0x%0x rdata_b=0x%0x",
+            raddr_a, raddr_a << 2, raddr_b, raddr_b << 2, we, waddr, waddr << 2, rdata_a, rdata_b));
       rdata_a[7:0] <= mem0[raddr_a];
       rdata_b[7:0] <= mem0[raddr_b];
    end
@@ -251,12 +256,12 @@ endmodule // ram_2r1w
 module byte_read #(
 ) (
    // Physical interface towards RAM
-   output logic [31:0] raddr,
    input logic [31:0]  rdata,
 
    // Logical interface towards CPU
    input logic [31:0]  byte_addr,
    input logic [2:0]   byte_len,
+   input logic	       byte_signed,
    output logic [31:0] word_out
 );
    // Read the word that contains the target byte(s) and right justify
@@ -267,11 +272,19 @@ module byte_read #(
    always_comb begin
       word_addr = byte_addr >> 2;
       word_offset = byte_addr & 3;
-      word_shift = word_offset << 3;
-      raddr = word_addr;
+      word_shift = (3 - word_offset) << 3;  // left justify
       case (byte_len)
-        1: word_out = (rdata >> word_shift) & 32'h000000ff;
-        2: word_out = (rdata >> word_shift) & 32'h0000ffff;
+	1: begin
+	   word_out = $signed(rdata << word_shift) >>> 24;
+	   if (!byte_signed)
+	     word_out = word_out & 32'h000000ff;
+	end
+	2: begin
+	   word_out = word_offset == 0 ? rdata << 16 : rdata;
+	   word_out = $signed(word_out) >> 16;
+	   if (!byte_signed)
+	     word_out = word_out & 32'h0000ffff;
+	end
         default: word_out = rdata;
       endcase // case (byte_len)
    end
@@ -508,16 +521,15 @@ endmodule // Decode
 
 
 module EX(input         clk,
-          input         id_ex_t id_ex,
-          input         wb_ex_t wb_ex,
-          input         regfile_t regs,
-          input         fwd_valid,
-          input [4:0]   fwd_reg,
-          input [31:0]  fwd_data,
-          output        pmu_t pmu,
-          output        ex_wb_t ex_wb,
-          output [31:0] raddr,
-          output [2:0]  rlen
+          input		id_ex_t id_ex,
+          input		wb_ex_t wb_ex,
+          input		regfile_t regs,
+          input		fwd_valid,
+          input [4:0]	fwd_reg,
+          input [31:0]	fwd_data,
+          output	pmu_t pmu,
+          output	ex_wb_t ex_wb,
+          output [31:0]	raddr
 );
    inst_t i;
    wire [4:0] rd, rs1, rs2;
@@ -546,19 +558,18 @@ module EX(input         clk,
 
    always_comb begin
       raddr = 0;
-      rlen = 0;
       case (id_ex.asm_op)
-        LB_INST: begin raddr = rs1_plus_imm; rlen = 1; end
-        LH_INST: begin raddr = rs1_plus_imm; rlen = 2; end
+        LB_INST: begin raddr = rs1_plus_imm >> 2; end
+        LH_INST: begin raddr = rs1_plus_imm >> 2; end
         LW_INST: begin
-           raddr = rs1_plus_imm; rlen = 4;
+           raddr = rs1_plus_imm >> 2;
            if (ex_wb.wr_mem_len != 0 && rs1_plus_imm == ex_wb.wr_mem_addr) begin
               $display("pc=0x%0x RAW hazard on 0x%0x. bypass the value %0d?",
                        id_ex.pc, rs1_plus_imm, ex_wb.wr_mem_data);
            end
         end
-        LBU_INST: begin raddr = rs1_plus_imm; rlen = 1; end
-        LHU_INST: begin raddr = rs1_plus_imm; rlen = 2; end
+        LBU_INST: begin raddr = rs1_plus_imm >> 2; end
+        LHU_INST: begin raddr = rs1_plus_imm >> 2; end
       endcase // case (id_ex.asm_op)
    end
 
@@ -575,7 +586,7 @@ module EX(input         clk,
       ex_wb.rval <= 0;
       ex_wb.pc <= id_ex.pc;
       ex_wb.pmu_is_branch <= 0;
-      ex_wb.pmu_is_call <= 0;
+      ex_wb.pmu_is_br_indirect <= 0;
       ex_wb.pmu_is_load <= 0;
       ex_wb.pmu_is_store <= 0;
       ex_wb.pmu_is_alu <= 0;
@@ -737,6 +748,9 @@ module EX(input         clk,
            `LOG(("EX ] load len=%0d addr=0x%0x to r%0d", 1, rs1_plus_imm, i.i_type.rd));
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.i_type.rd;
+	   ex_wb.rd_mem_addr <= rs1_plus_imm;
+	   ex_wb.rd_mem_len <= 1;
+	   ex_wb.rd_mem_signed <= 1;
            ex_wb.pmu_is_load <= 1;
            ex_wb.rd_mem <= 1;
         end
@@ -744,6 +758,9 @@ module EX(input         clk,
            `LOG(("EX ] load len=%0d addr=0x%0x to r%0d", 2, rs1_plus_imm, i.i_type.rd));
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.i_type.rd;
+	   ex_wb.rd_mem_addr <= rs1_plus_imm;
+	   ex_wb.rd_mem_len <= 2;
+	   ex_wb.rd_mem_signed <= 1;
            ex_wb.pmu_is_load <= 1;
            ex_wb.rd_mem <= 1;
         end
@@ -752,6 +769,9 @@ module EX(input         clk,
                  id_ex.pc, rd, id_ex.imm, rs1, rd, rs1_plus_imm));
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.i_type.rd;
+	   ex_wb.rd_mem_addr <= rs1_plus_imm;
+	   ex_wb.rd_mem_len <= 4;
+	   ex_wb.rd_mem_signed <= 1;
            ex_wb.pmu_is_load <= 1;
            ex_wb.rd_mem <= 1;
         end
@@ -759,13 +779,19 @@ module EX(input         clk,
            `LOG(("EX ] load unsigned len=%0d addr=0x%0x", 1, rs1_plus_imm));
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.i_type.rd;
+	   ex_wb.rd_mem_addr <= rs1_plus_imm;
+	   ex_wb.rd_mem_len <= 1;
            ex_wb.pmu_is_load <= 1;
+	   ex_wb.rd_mem_signed <= 0;
            ex_wb.rd_mem <= 1;
         end
         LHU_INST: begin
            `LOG(("EX ] load unsigned len=%0d addr=0x%0x", 2, rs1_plus_imm));
            ex_wb.rd_valid <= 1;
            ex_wb.rd <= i.i_type.rd;
+	   ex_wb.rd_mem_addr <= rs1_plus_imm;
+	   ex_wb.rd_mem_len <= 2;
+	   ex_wb.rd_mem_signed <= 0;
            ex_wb.pmu_is_load <= 1;
            ex_wb.rd_mem <= 1;
         end
@@ -872,7 +898,7 @@ module EX(input         clk,
            ex_wb.rd <= i.j_type.rd;
            ex_wb.rd_valid <= 1;
            ex_wb.rval <= id_ex.pc + 4;
-           ex_wb.pmu_is_call <= 1;
+           ex_wb.pmu_is_branch <= 1;
         end
         JALR_INST: begin
            `LOG(("EX ] pc=0x%0x JALR: r%0d <- 0x%0x, pc <- r%0d (0x%0x) + 0x%0x = 0x%0x",
@@ -883,7 +909,7 @@ module EX(input         clk,
            ex_wb.rd <= i.i_type.rd;
            ex_wb.rd_valid <= 1;
            ex_wb.rval <= id_ex.pc + 4;
-           ex_wb.pmu_is_call <= 1;
+           ex_wb.pmu_is_br_indirect <= 1;
         end
         LUI_INST: begin
            `LOG(("lui"));
@@ -913,25 +939,32 @@ endmodule // Execute
 
 
 module WB(input         clk,
-          input         ex_wb_t ex_wb,
-          input [31:0]  rdata,
-          input [31:0]  rdata_raw,
-          output        wb_if_t wb_if,
-          output        wb_id_t wb_id,
-          output        wb_ex_t wb_ex,
-          output        regfile_t regs,
-          output        pmu_t pmu,
-          output        fwd_valid,
-          output [31:0] fwd_data,
-          output [4:0]  fwd_reg,
-          output [2:0]  wlen,
-          output [31:0] waddr,
-          output [31:0] wdata
+          input		ex_wb_t ex_wb,
+          input [31:0]	mem_rdata,
+          output	wb_if_t wb_if,
+          output	wb_id_t wb_id,
+          output	wb_ex_t wb_ex,
+          output	regfile_t regs,
+          output	pmu_t pmu,
+          output	fwd_valid,
+          output [31:0]	fwd_data,
+          output [4:0]	fwd_reg,
+          output [2:0]	wlen,
+          output [31:0]	waddr,
+          output [31:0]	wdata
           );
+
+   logic [31:0]	rdata;
+   byte_read ex_read(.rdata(mem_rdata),
+		     .byte_addr(ex_wb.rd_mem_addr),
+                     .byte_len(ex_wb.rd_mem_len),
+		     .byte_signed(ex_wb.rd_mem_signed),
+                     .word_out(rdata)
+                     );
 
    assign fwd_valid = ! ex_wb.invalid && ! wb_ex.invalid && ex_wb.rd_valid && ex_wb.rd != 0;
    assign fwd_reg = ex_wb.rd;
-   assign fwd_data = ex_wb.rd_mem ? rdata_raw : ex_wb.rval;
+   assign fwd_data = ex_wb.rd_mem ? rdata : ex_wb.rval;
 
    always @(posedge clk) begin
       if (fwd_valid) begin
@@ -961,7 +994,10 @@ module WB(input         clk,
          if (ex_wb.rd_valid && ex_wb.rd != 0) begin
             regs.gpr[ex_wb.rd] <= ex_wb.rd_mem ? rdata : ex_wb.rval;
             if (ex_wb.rd_mem) begin
-               `LOG(("WB ] commit mem load r%0d <- 0x%0x (%0d)", ex_wb.rd, rdata, rdata));
+               `LOG(("WB ] commit mem load r%0d <- 0x%0x (%0d) from addr=0x%0x len=%0d signed=%0d mem_rdata=0x%0x",
+		     ex_wb.rd, rdata, rdata,
+		     ex_wb.rd_mem_addr, ex_wb.rd_mem_len, ex_wb.rd_mem_signed,
+		     mem_rdata));
             end else begin
                `LOG(("WB ] commit r%0d <- 0x%0x (%0d)", ex_wb.rd, ex_wb.rval, ex_wb.rval));
             end
@@ -970,13 +1006,23 @@ module WB(input         clk,
          if (ex_wb.wr_mem_len != 0) begin
             `LOG(("WB ] commit mem store len=%0d [0x%0x] = 0x%0x",
                   ex_wb.wr_mem_len, ex_wb.wr_mem_addr, ex_wb.wr_mem_data));
-            wlen <= ex_wb.wr_mem_len;
-            waddr <= ex_wb.wr_mem_addr;
-            wdata <= ex_wb.wr_mem_data;
+	    case (ex_wb.wr_mem_addr)
+	      32'h80000000: begin
+		 pmu.user <= pmu.user + 1;
+	      end
+	      32'h80000004: begin
+		 pmu.user2 <= ex_wb.wr_mem_data;
+	      end
+	      default: begin
+		 wlen <= ex_wb.wr_mem_len;
+		 waddr <= ex_wb.wr_mem_addr;
+		 wdata <= ex_wb.wr_mem_data;
+	      end
+	    endcase // case (ex_wb.wr_mem_addr)
          end
 
          if (ex_wb.pmu_is_alu) pmu.alu_retired <= pmu.alu_retired + 1;
-         if (ex_wb.pmu_is_call) pmu.call_retired <= pmu.call_retired + 1;
+         if (ex_wb.pmu_is_br_indirect) pmu.br_indirect_retired <= pmu.br_indirect_retired + 1;
          if (ex_wb.pmu_is_branch) pmu.br_retired <= pmu.br_retired + 1;
          if (ex_wb.pmu_is_load) pmu.load_retired <= pmu.load_retired + 1;
          if (ex_wb.pmu_is_store) pmu.store_retired <= pmu.store_retired + 1;
@@ -993,15 +1039,19 @@ endmodule // WB
 
 module cpu(input         clk,
            output [31:0] r10,
-           output [31:0] alu_retired,
-           output [31:0] br_retired,
-           output [31:0] br_taken,
-           output [31:0] call_retired,
-           output [31:0] cycle_cnt,
-           output [31:0] inst_retired,
-           output [31:0] load_retired,
-           output [31:0] reg_forwards,
-           output [31:0] store_retired
+           output [31:0] pmu_alu_retired,
+           output [31:0] pmu_br_retired,
+           output [31:0] pmu_br_taken,
+           output [31:0] pmu_br_indirect_retired,
+           output [63:0] pmu_cycles,
+           output [31:0] pmu_inst_retired,
+           output [31:0] pmu_load_retired,
+           output [31:0] pmu_reg_forwards,
+           output [31:0] pmu_store_retired,
+           output [63:0] pmu_user,
+	   output	 vfd_sdi,
+	   output	 vfd_cs,
+	   output	 vfd_clk
 );
    logic [31:0] mem_raddr_a, mem_raddr_b;
    logic [31:0] mem_rdata_a, mem_rdata_b;
@@ -1017,16 +1067,6 @@ module cpu(input         clk,
                  .raddr_b(mem_raddr_b),
                  .rdata_b(mem_rdata_b)
                  );
-
-   logic [31:0] ex_raddr;
-   logic [2:0]  ex_rlen;
-   logic [31:0] ex_rdata;
-   byte_read ex_read(.raddr(mem_raddr_b),
-                     .rdata(mem_rdata_b),
-                     .byte_addr(ex_raddr),
-                     .byte_len(ex_rlen),
-                     .word_out(ex_rdata)
-                     );
 
    logic [31:0] wb_addr;
    logic [2:0]  wb_len;
@@ -1059,25 +1099,47 @@ module cpu(input         clk,
    IF1 fetch(.clk(clk), .raddr(mem_raddr_a), .if_id(if_id), .wb_if(wb_if));
    IF2 decode(.rdata(mem_rdata_a), .if_id(if_id), .id_ex(id_ex));
    EX execute(.clk(clk), .id_ex(id_ex), .ex_wb(ex_wb), .wb_ex(wb_ex),
-              .raddr(ex_raddr), .rlen(ex_rlen),
+              .raddr(mem_raddr_b),
               .fwd_valid(wb_fwd_valid), .fwd_reg(wb_fwd_reg), .fwd_data(wb_fwd_data),
               .regs(regs), .pmu(pmu)
               );
    WB wback(.clk(clk), .ex_wb(ex_wb), .wb_id(wb_id), .wb_if(wb_if), .wb_ex(wb_ex),
-            .regs(regs), .rdata(ex_rdata), .rdata_raw(mem_rdata_b),
+            .regs(regs), .mem_rdata(mem_rdata_b),
             .waddr(wb_addr), .wdata(wb_data), .wlen(wb_len),
             .fwd_valid(wb_fwd_valid), .fwd_reg(wb_fwd_reg), .fwd_data(wb_fwd_data),
             .pmu(pmu));
 
-   assign cycle_cnt = pmu.cycles;
-   assign inst_retired = pmu.inst_retired;
-   assign br_taken = pmu.br_taken;
-   assign br_retired = pmu.br_retired;
-   assign call_retired = pmu.call_retired;
-   assign alu_retired = pmu.alu_retired;
-   assign load_retired = pmu.load_retired;
-   assign store_retired = pmu.store_retired;
-   assign reg_forwards = pmu.reg_forwards;
+   logic [63:0] display_value;
+   logic	display_rst_n;
+   vfd_16sd13gink #
+     (
+      .CLK_HZ(50_000_000),
+      .SCLK_HZ(10_000),        // datasheet max 500_000
+      .COMMAS(1)
+      ) u_vfd (
+	       .clk    (clk),
+	       .rst_n  (display_rst_n),
+	       .value  (display_value),   // any 64-bit value; bits [47:0] are shown
+	       .vfd_clk(vfd_clk),
+	       .vfd_cs (vfd_cs),
+	       .vfd_sdi(vfd_sdi)
+	       );
+   always_comb begin
+      display_value = {32'b0, pmu.user2};
+      // display_value = pmu.user;
+      display_rst_n = 1;
+   end
+
+   assign pmu_cycles = pmu.cycles;
+   assign pmu_inst_retired = pmu.inst_retired;
+   assign pmu_br_taken = pmu.br_taken;
+   assign pmu_br_retired = pmu.br_retired;
+   assign pmu_br_indirect_retired = pmu.br_indirect_retired;
+   assign pmu_alu_retired = pmu.alu_retired;
+   assign pmu_load_retired = pmu.load_retired;
+   assign pmu_store_retired = pmu.store_retired;
+   assign pmu_reg_forwards = pmu.reg_forwards;
+   assign pmu_user = pmu.user;
    assign r10 = regs.gpr[10];
 
    always @(posedge clk)

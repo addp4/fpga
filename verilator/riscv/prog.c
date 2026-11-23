@@ -14,6 +14,19 @@ int main(int n) {
 }
 
 #elif 0
+// byte read test
+typedef signed char T;
+T buf[] = {-1,-2,3,-4,-5,-6,-7,-8};
+
+int main() {
+  T *p = buf;
+  int sum = 0;
+  for (int i = 0; i < sizeof(buf); i++)
+    sum += *(p+i);
+  return sum;
+}
+
+#elif 0
 
 int main() {
 
@@ -29,7 +42,7 @@ int main() {
   return sum;
 }
 
-#elif 1
+#elif 0
 
 // busybeaver without memory, tape is in a register
 // A0	A1	B0	B1	C0	C1	D0	D1	sigma(M)	s(M)
@@ -62,6 +75,107 @@ int main() {
   return count;
 }
 
+#elif 0
+
+// busybeaver
+// A0	A1	A2	A3	B0	B1	B2	B3	sigma(M)	s(M)
+// 1RB	2LA	1RA	1RA	1LB	1LA	3RB	1RH	2,050	3,932,964
+#define N 8192
+char tape[N];
+
+enum { A, B, H };
+#define R 1
+// #define L -1
+#define L -1
+
+typedef signed char T;
+typedef struct {
+  T dir[4];
+  T state[4];
+  T sym[4];
+} state_t;
+
+state_t states[] = {
+  [A] = {
+    .sym = {1, 2, 1, 1},
+    .dir = {R, L, R, R},
+    .state = {B, A, A, A},
+  },
+  [B] = {
+    .sym = {1, 1, 3, 1},
+    .dir = {L, L, R, R},
+    .state = {B, A, B, H},
+  },
+};
+
+int main() {
+  volatile int *pmu_user = (int *)0x80000000;
+  volatile int *pmu_user2 = (int *)0x80000004;
+  int count = 0;
+  int pos = N/2;
+  int state = A;
+  while(state != H) {
+    *pmu_user = 0;
+    *pmu_user2 = pos;
+    count++;
+    int sym = tape[pos];
+    state_t *s = &states[state];
+    tape[pos] = s->sym[sym];
+    pos += s->dir[sym];
+    state = s->state[sym];
+  }
+  return count;
+}
+
+#elif 1
+
+// busybeaver
+// A0  A1  A2  A3  A4  B0  B1  B2  B3  B4  s(M)        σ(M)
+// 1RB 3LA 4LA 1RA 1LA 2LA 1RH 4RA 3RB 1RA 148,304,214 11,120
+#define N 32768
+char tape[N];
+
+enum { A, B, H, R=1, L=-1 };
+
+typedef signed char T;
+typedef struct {
+  T dir[8];
+  T state[8];
+  T sym[8];
+} state_t;
+
+state_t states[] = {
+  [A] = {
+    .sym = {1, 3, 4, 1, 1 },
+    .dir = {R, L, L, R, L},
+    .state = {B, A, A, A, A},
+  },
+  [B] = {
+    .sym = {2, 1, 4, 3, 1},
+    .dir = {L, R, R, R, R},
+    .state = {A, H, A, B, A},
+  },
+};
+
+int main() {
+  volatile int *pmu_user = (int *)0x80000000;
+  volatile int *pmu_user2 = (int *)0x80000004;
+  int count = 0;
+  int pos = N/2;
+  int state = A;
+  while(state != H) {
+    *pmu_user = 0;
+    *pmu_user2 = pos;
+    count++;
+    int sym = tape[pos];
+    state_t *s = &states[state];
+    tape[pos] = s->sym[sym];
+    pos += s->dir[sym];
+    state = s->state[sym];
+  }
+  return count;
+}
+
 #elif 1
 
 // busybeaver
@@ -72,9 +186,11 @@ int tape[N];
 int main() {
   enum { A, B, C, D, H } state = A;
   enum { L, R } dir;
+  volatile int *pmu_user = (int *)0x80000000;
   int count = 0;
   int pos = N/2;
   while(state != H) {
+    *pmu_user = 0;
     count++;
     int sym = tape[pos];
     if      (state == A && sym == 0) { sym = 1; dir = R; state = B; }
